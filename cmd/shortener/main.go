@@ -19,23 +19,23 @@ func apiPost(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, "400 Bad Request", http.StatusBadRequest)
 	}
 
-	shortUrl := fmt.Sprintf("/%d", len(url)+1)
-	urlMap[shortUrl] = url
+	shortUrla := fmt.Sprintf("/%d", len(url)+1)
+	urlMap[shortUrla] = url
 
 	res.WriteHeader(http.StatusCreated)
-	fmt.Fprintf(res, "%s", shortUrl)
+	fmt.Fprintf(res, "%s", shortUrla)
 }
 
 func apiGet(res http.ResponseWriter, req *http.Request) {
 	id := req.URL.Path[len("/"):]
 
-	originalUrl, asb := urlMap[id]
+	originalUrla, asb := urlMap[id]
 	if !asb {
 		http.NotFound(res, req)
 		return
 	}
 
-	http.Redirect(res, req, originalUrl, http.StatusTemporaryRedirect)
+	http.Redirect(res, req, originalUrla, http.StatusTemporaryRedirect)
 }
 
 func main() {

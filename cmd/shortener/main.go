@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-//var urlMap = make(map[string]string)
+var urlMap = make(map[string]string)
 
 func apiPost(res http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
@@ -20,19 +20,22 @@ func apiPost(res http.ResponseWriter, req *http.Request) {
 	}
 
 	shortUrl := fmt.Sprintf("/%d", len(url)+1)
+	urlMap[shortUrl] = url
 
 	res.WriteHeader(http.StatusCreated)
 	fmt.Fprintf(res, "%s", shortUrl)
 }
 
 func apiGet(res http.ResponseWriter, req *http.Request) {
-	url := req.URL.Path[len("/"):]
+	id := req.URL.Path[len("/"):]
 
-	if url == "" {
+	originalUrl, asb := urlMap[id]
+	if !asb {
 		http.NotFound(res, req)
 		return
 	}
 
+	http.Redirect(res, req, originalUrl, http.StatusTemporaryRedirect)
 }
 
 func main() {

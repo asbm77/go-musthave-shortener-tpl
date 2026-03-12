@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-var urlMap = make(map[string]string)
+//var urlMap = make(map[string]string)
 
 func apiPost(res http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
@@ -19,8 +19,8 @@ func apiPost(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, "400 Bad Request", http.StatusBadRequest)
 	}
 
-	shortUrl := fmt.Sprintf("/%d", len(urlMap)+1)
-	urlMap[shortUrl] = url
+	shortUrl := fmt.Sprintf("/%d", len(url)+1)
+	//urlMap[shortUrl] = url
 
 	res.WriteHeader(http.StatusCreated)
 	fmt.Fprintf(res, "%s", shortUrl)

@@ -1,6 +1,6 @@
 package main
 
-//3
+//4
 import (
 	"fmt"
 	"net/http"
@@ -20,17 +20,15 @@ func apiPost(res http.ResponseWriter, req *http.Request) {
 	}
 
 	shortUrl := fmt.Sprintf("/%d", len(url)+1)
-	//urlMap[shortUrl] = url
 
 	res.WriteHeader(http.StatusCreated)
 	fmt.Fprintf(res, "%s", shortUrl)
 }
 
 func apiGet(res http.ResponseWriter, req *http.Request) {
-	id := req.URL.Path[len("/"):]
+	url := req.URL.Path[len("/"):]
 
-	asb := urlMap[id]
-	if asb == "" {
+	if url == "" {
 		http.NotFound(res, req)
 		return
 	}
@@ -43,9 +41,9 @@ func main() {
 	mux.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
 		switch req.Method {
 		case http.MethodPost:
-
 			apiPost(res, req)
 		case http.MethodGet:
+
 			apiGet(res, req)
 		default:
 			http.Error(res, "400 Bad Request", http.StatusBadRequest)

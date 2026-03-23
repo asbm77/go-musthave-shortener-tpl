@@ -25,7 +25,7 @@ func apiPost(res http.ResponseWriter, req *http.Request) {
 	url := string(body)
 	shortUrla := fmt.Sprintf("/%d", len(url)+1)
 	urlMap[shortUrla] = url
-	shortUrlares := "http//" + req.Host + fmt.Sprintf("/%d", len(url)+1)
+	shortUrlares := "http://" + req.Host + fmt.Sprintf("/%d", len(url)+1)
 
 	res.WriteHeader(http.StatusCreated)
 	fmt.Fprintf(res, "%s", shortUrlares)
@@ -33,7 +33,7 @@ func apiPost(res http.ResponseWriter, req *http.Request) {
 }
 
 func apiGet(res http.ResponseWriter, req *http.Request) {
-	//id := req.URL.Path[len("/"):]
+
 	id := req.URL.Path
 
 	asb := urlMap[id]
@@ -49,8 +49,8 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
-		rawURL := req.URL.String()
 
+		rawURL := req.URL.String()
 		_, err := url.ParseRequestURI(rawURL)
 		if err != nil {
 			http.Error(res, "400 Bad Request", http.StatusBadRequest)

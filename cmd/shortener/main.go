@@ -1,10 +1,11 @@
 package main
 
-//6
+//7
 import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 )
 
 var urlMap = make(map[string]string)
@@ -28,6 +29,7 @@ func apiPost(res http.ResponseWriter, req *http.Request) {
 
 	res.WriteHeader(http.StatusCreated)
 	fmt.Fprintf(res, "%s", shortUrlares)
+
 }
 
 func apiGet(res http.ResponseWriter, req *http.Request) {
@@ -47,6 +49,14 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
+		rawURL := req.URL.String()
+
+		_, err := url.ParseRequestURI(rawURL)
+		if err != nil {
+			http.Error(res, "400 Bad Request", http.StatusBadRequest)
+			return
+		}
+
 		switch req.Method {
 		case http.MethodPost:
 			apiPost(res, req)

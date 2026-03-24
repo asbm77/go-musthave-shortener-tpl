@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
+
+	"github.com/go-chi/chi/v5"
 )
 
 var urlMap = make(map[string]string)
@@ -46,28 +47,12 @@ func apiGet(res http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
-	rasb := chi.NewRouter()
+	r := chi.NewRouter()
 
-	mux.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
+	r.Get("/", apiGet)
+	r.Post("/", apiPost)
 
-		rawURL := req.URL.String()
-		_, err := url.ParseRequestURI(rawURL)
-		if err != nil {
-			http.Error(res, "400 Bad Request", http.StatusBadRequest)
-			return
-		}
-
-		switch req.Method {
-		case http.MethodPost:
-			apiPost(res, req)
-		case http.MethodGet:
-			apiGet(res, req)
-		default:
-			http.Error(res, "400 Bad Request", http.StatusBadRequest)
-		}
-	})
-
-	err := http.ListenAndServe(`localhost:8080`, mux)
+	err := http.ListenAndServe(`localhost:8080`, r)
 	if err != nil {
 		panic(err)
 	}

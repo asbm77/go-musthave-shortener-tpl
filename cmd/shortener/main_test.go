@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func Test_apiGet(t *testing.T) {
+func Test_apiGet1(t *testing.T) {
 	type args struct {
 		res http.ResponseWriter
 		req *http.Request
@@ -23,7 +23,7 @@ func Test_apiGet(t *testing.T) {
 	}
 }
 
-func Test_apiPost(t *testing.T) {
+func Test_apiPost1(t *testing.T) {
 	type args struct {
 		res http.ResponseWriter
 		req *http.Request

@@ -46,7 +46,7 @@ func apiGet(res http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
-	mux := http.NewServeMux()
+	rasb := chi.NewRouter()
 
 	mux.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
 

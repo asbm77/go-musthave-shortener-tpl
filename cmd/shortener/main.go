@@ -47,6 +47,8 @@ func apiGet(res http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
+	parseFlags()
+
 	r := chi.NewRouter()
 
 	r.Get("/{id}", apiGet)

@@ -49,7 +49,7 @@ func apiGet(res http.ResponseWriter, req *http.Request) {
 func main() {
 	r := chi.NewRouter()
 
-	r.Get("/", apiGet)
+	r.Get("/{id}", apiGet)
 	r.Post("/", apiPost)
 
 	err := http.ListenAndServe(`localhost:8080`, r)

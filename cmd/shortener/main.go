@@ -26,7 +26,7 @@ func apiPost(res http.ResponseWriter, req *http.Request) {
 	url := string(body)
 	shortUrla := fmt.Sprintf("/%d", len(url)+1)
 	urlMap[shortUrla] = url
-	shortUrlares := "http://" + req.Host + fmt.Sprintf("/%d", len(url)+1)
+	shortUrlares := flagUrlAddr + fmt.Sprintf("/%d", len(url)+1)
 
 	res.WriteHeader(http.StatusCreated)
 	fmt.Fprintf(res, "%s", shortUrlares)
@@ -52,7 +52,7 @@ func main() {
 	r.Get("/{id}", apiGet)
 	r.Post("/", apiPost)
 
-	err := http.ListenAndServe(`localhost:8080`, r)
+	err := http.ListenAndServe(flagRunAddr, r)
 	if err != nil {
 		panic(err)
 	}

@@ -26,9 +26,9 @@ func apiPost(res http.ResponseWriter, req *http.Request) {
 	}
 
 	url := string(body)
-	shortUrla := uuid.NewString()[:8]
+	shortUrla := "/" + uuid.NewString()[:8]
 	urlMap[shortUrla] = url
-	shortUrlares := flagShortAddr + uuid.NewString()[:8]
+	shortUrlares := flagShortAddr + "/" + uuid.NewString()[:8]
 
 	res.WriteHeader(http.StatusCreated)
 	fmt.Fprintf(res, "%s", shortUrlares)

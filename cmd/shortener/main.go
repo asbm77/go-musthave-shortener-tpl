@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 var urlMap = make(map[string]string)
@@ -23,10 +24,11 @@ func apiPost(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, "400 Bad Request", http.StatusBadRequest)
 		return
 	}
+
 	url := string(body)
-	shortUrla := fmt.Sprintf("/%d", len(url)+1)
+	shortUrla := uuid.NewString()[:8]
 	urlMap[shortUrla] = url
-	shortUrlares := flagShortAddr + fmt.Sprintf("/%d", len(url)+1)
+	shortUrlares := flagShortAddr + uuid.NewString()[:8]
 
 	res.WriteHeader(http.StatusCreated)
 	fmt.Fprintf(res, "%s", shortUrlares)

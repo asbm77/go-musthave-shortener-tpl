@@ -134,7 +134,7 @@ func Test_apiPost(t *testing.T) {
 			t.Errorf("Ожидался статус %d, получен %d", http.StatusBadRequest, res.Code)
 		}
 
-		if mockStore.SetCalls != nil && len(mockStore.SetCalls) > 0 {
+		if len(mockStore.SetCalls) > 0 {
 			t.Error("Метод store.Set не должен был вызываться")
 		}
 

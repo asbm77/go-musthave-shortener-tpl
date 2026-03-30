@@ -10,10 +10,12 @@ import (
 func main() {
 	parseFlags()
 
+	store := NewInMemoryStorage()
+
 	r := chi.NewRouter()
 
-	r.Get("/{id}", apiGet)
-	r.Post("/", apiPost)
+	r.Get("/{id}", apiGet(store))
+	r.Post("/", apiPost(store))
 
 	err := http.ListenAndServe(flagRunAddr, r)
 	if err != nil {

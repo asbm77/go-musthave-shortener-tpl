@@ -56,54 +56,51 @@ func gzipResponseMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// Вспомогательная структура для обертки ResponseWriter
+// gzipResponseWriter — обёртка для сжатия ответа.
 type gzipResponseWriter struct {
 	io.Writer
-	http.ResponseWriter // Исходный ResponseWriter для записи заголовков
+	http.ResponseWriter
 
-	headers     http.Header // Буфер для хранения заголовков
-	status      int         // Хранение статуса кода
-	wroteHeader bool        // Флаг: были ли записаны заголовки
+	headers     http.Header
+	status      int
+	wroteHeader bool
+	disableGzip bool // Флаг для отключения сжатия
 }
 
+// WriteHeader сохраняет заголовки и статус.
 func (w *gzipResponseWriter) WriteHeader(statusCode int) {
 	if w.wroteHeader {
 		return
 	}
 	w.status = statusCode
-
-	// Копируем все заголовки из исходного ResponseWriter в наш буфер,
-	// кроме Content-Length и Content-Encoding, которые мы установим сами.
 	w.headers = w.ResponseWriter.Header().Clone()
-
 	w.wroteHeader = true
 }
 
-// writeHeadersAndStatus — вспомогательный метод.
-// Записывает сохраненные заголовки и статус-код в исходный ResponseWriter.
-func (w *gzipResponseWriter) writeHeadersAndStatus() {
-	if w.wroteHeader {
-		// Записываем статус-код
-		w.ResponseWriter.WriteHeader(w.status)
-
-		// Записываем сохраненные заголовки
-		dst := w.ResponseWriter.Header()
-		for k, vv := range w.headers {
-			dst[k] = vv
-		}
-	}
-}
-
-// Write переопределяет стандартный метод записи тела.
-// Перед записью тела она гарантирует, что заголовки и статус отправлены.
+// Write переопределяет запись тела.
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	// Если сжатие отключено или тело пустое, пишем напрямую в исходный ResponseWriter.
+	if w.disableGzip || len(b) == 0 {
+		if !w.wroteHeader {
+			w.WriteHeader(http.StatusOK)
+		}
+		// Записываем сохраненные заголовки и статус
+		w.ResponseWriter.WriteHeader(w.status)
+		for k, vv := range w.headers {
+			w.ResponseWriter.Header()[k] = vv
+		}
+		return w.ResponseWriter.Write(b)
+	}
+
+	// Если мы дошли сюда, значит есть тело и его нужно сжать.
 	if !w.wroteHeader {
-		// Если WriteHeader еще не вызывался, считаем это кодом 200 OK
 		w.WriteHeader(http.StatusOK)
 	}
 
-	// Перед записью данных в gzip.Writer, записываем заголовки в исходный ResponseWriter
-	w.writeHeadersAndStatus()
+	// Устанавливаем заголовок о сжатии перед отправкой данных
+	w.ResponseWriter.Header().Set("Content-Encoding", "gzip")
+	// Записываем статус и остальные заголовки
+	w.ResponseWriter.WriteHeader(w.status)
 
 	return w.Writer.Write(b)
 }

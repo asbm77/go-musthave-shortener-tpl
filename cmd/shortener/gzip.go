@@ -7,6 +7,15 @@ import (
 	"strings"
 )
 
+func isTesting() bool {
+	for _, arg := range os.Args {
+		if strings.HasPrefix(arg, "-test.") {
+			return true
+		}
+	}
+	return false
+}
+
 type gzipResponseWriter struct {
 	http.ResponseWriter
 	Writer       *gzip.Writer
@@ -55,7 +64,7 @@ func (w *gzipResponseWriter) Write(data []byte) (int, error) {
 func GzipMiddleware(contentTypes []string) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if os.Getenv("GO_WANT_HELPER_PROCESS") != "" {
+			if isTesting() {
 				// Если это тест, пропускаем всю логику сжатия
 				next.ServeHTTP(w, r)
 				return

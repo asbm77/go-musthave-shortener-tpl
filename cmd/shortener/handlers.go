@@ -9,6 +9,7 @@ import (
 
 	//"shortener/storage"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -115,17 +116,12 @@ func apiPostShorten(store Storage) http.HandlerFunc {
 
 func redirectToOriginal(store Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.URL.Path
 
-		if id == "/api/shorten" || id == "/" { // Не обрабатываем запросы к API как короткие ссылки
-			http.NotFound(w, r)
-			return
-		}
+		id := chi.URLParam(r, "*")
 
 		originalURL, err := store.Get(id)
 		if err != nil {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			log.Printf("Ошибка получения из хранилища: %v", err)
+			http.NotFound(w, r)
 			return
 		}
 

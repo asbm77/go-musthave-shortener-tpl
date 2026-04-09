@@ -59,10 +59,9 @@ func main() {
 
 	r.Use(LoggingMiddleware)
 
-	r.Get("/{id}", apiGet(store))
+	r.Get("/{id}", redirectToOriginal(store))
 	r.Post("/", apiPost(store))
 	r.Post("/api/shorten", apiPostShorten(store))
-	r.Post("/", redirectToOriginal(store))
 
 	err := http.ListenAndServe(flagRunAddr, r)
 	if err != nil {

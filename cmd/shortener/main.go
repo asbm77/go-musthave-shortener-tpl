@@ -59,15 +59,14 @@ func main() {
 
 	r.Use(LoggingMiddleware)
 
-	handler := gzipRequestMiddleware(
-		gzipResponseMiddleware(r),
-	)
-
 	r.Get("/{id}", redirectToOriginal(store))
-	r.Post("/", apiPost(store))
-	r.Post("/api/shorten", apiPostShorten(store))
 
-	err := http.ListenAndServe(flagRunAddr, handler)
+	api := r.With(gzipRequestMiddleware, gzipResponseMiddleware)
+
+	api.Post("/", apiPost(store))
+	api.Post("/api/shorten", apiPostShorten(store))
+
+	err := http.ListenAndServe(flagRunAddr, r)
 	if err != nil {
 		panic(err)
 	}

@@ -81,11 +81,6 @@ func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 	// Если сжатие отключено или тело пустое, пишем напрямую в исходный ResponseWriter.
 	if w.disableGzip || len(b) == 0 {
 
-		if gw, ok := w.Writer.(*gzip.Writer); ok {
-			gw.Flush()
-
-		}
-
 		if !w.wroteHeader {
 			w.WriteHeader(http.StatusOK)
 		}

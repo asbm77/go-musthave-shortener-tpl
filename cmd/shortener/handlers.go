@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -11,7 +12,13 @@ import (
 	"github.com/google/uuid"
 )
 
-//var urlMap = make(map[string]string)
+type ShortenRequest struct {
+	URL string `json:"url"`
+}
+
+type ShortenResponse struct {
+	Result string `json:"result"`
+}
 
 func apiPost(store Storage) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
@@ -63,5 +70,65 @@ func apiGet(store Storage) http.HandlerFunc {
 		}
 
 		http.Redirect(res, req, originalURL, http.StatusTemporaryRedirect)
+	}
+}
+
+func apiPostShorten(store Storage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// 1. Проверяем метод запроса
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// 2. Декодируем JSON из тела запроса
+		var req ShortenRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		if err != nil || req.URL == "" {
+			http.Error(w, "Bad Request: Invalid JSON or missing 'url'", http.StatusBadRequest)
+			return
+		}
+
+		// 3. Генерируем короткий ключ и полный URL
+		shortKey := "/" + uuid.NewString()[:8]
+		shortURL := flagShortAddr + shortKey
+
+		// 4. Сохраняем в хранилище
+		if err := store.Set(shortKey, req.URL); err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			log.Printf("Ошибка сохранения в хранилище: %v", err)
+			return
+		}
+
+		// 5. Формируем и отправляем JSON-ответ
+		response := ShortenResponse{Result: shortURL}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			log.Printf("Ошибка кодирования ответа: %v", err)
+			return
+		}
+	}
+}
+
+func redirectToOriginal(store Storage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Path
+
+		if id == "/api/shorten" || id == "/" { // Не обрабатываем запросы к API как короткие ссылки
+			http.NotFound(w, r)
+			return
+		}
+
+		originalURL, err := store.Get(id)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			log.Printf("Ошибка получения из хранилища: %v", err)
+			return
+		}
+
+		http.Redirect(w, r, originalURL, http.StatusMovedPermanently)
 	}
 }

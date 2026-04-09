@@ -125,9 +125,16 @@ func redirectToOriginal(store Storage) http.HandlerFunc {
 			return
 		}
 
+		res.Header().Set("Location", originalURL)
+
 		if gzw, ok := res.(*gzipResponseWriter); ok {
-			// Если да, отключаем для него сжатие
+
+			gzw.status = http.StatusTemporaryRedirect
 			gzw.disableGzip = true
+
+			gzw.headers = res.Header().Clone()
+
+			return
 		}
 
 		http.Redirect(res, req, originalURL, http.StatusTemporaryRedirect)

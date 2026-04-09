@@ -129,12 +129,7 @@ func redirectToOriginal(store Storage) http.HandlerFunc {
 		res.Header().Set("Location", originalURL)
 
 		if gzw, ok := res.(*gzipResponseWriter); ok {
-
-			gzw.status = http.StatusTemporaryRedirect
 			gzw.disableGzip = true
-
-			gzw.headers = res.Header().Clone()
-
 			return
 		}
 

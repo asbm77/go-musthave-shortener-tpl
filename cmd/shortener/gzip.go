@@ -35,36 +35,36 @@ func gzipRequestMiddleware(next http.Handler) http.Handler {
 func gzipResponseMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Проверяем, поддерживает ли клиент gzip
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			next.ServeHTTP(w, r)
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			// Создаем обертку для ResponseWriter
+			gw := gzip.NewWriter(w)
+			defer gw.Close()
+
+			// Создаем кастомный ResponseWriter
+			gzw := &gzipResponseWriter{Writer: gw, ResponseWriter: w}
+
+			// Устанавливаем заголовок Content-Encoding
+			w.Header().Set("Content-Encoding", "gzip")
+
+			// Передаем управление следующему обработчику с нашей оберткой
+			next.ServeHTTP(gzw, r)
 			return
 		}
 
-		// Создаем нашу обертку. writerFunc здесь — это конструктор gzip.NewWriter.
-		gzw := &gzipResponseWriter{
-			ResponseWriter: w,
-			status:         http.StatusOK,
-			writerFunc:     func(inner io.Writer) io.Writer { return gzip.NewWriter(inner) },
-			// По умолчанию пишем в оригинальный ResponseWriter
-			writer: w,
-		}
-
-		// Передаем управление следующему хендлеру с нашей оберткой
-		next.ServeHTTP(gzw, r)
+		// Если клиент не поддерживает сжатие, просто передаем управление
+		next.ServeHTTP(w, r)
 	})
 }
 
 // gzipResponseWriter — обёртка для сжатия ответа.
 type gzipResponseWriter struct {
+	io.Writer
 	http.ResponseWriter
+
+	headers     http.Header
 	status      int
 	wroteHeader bool
-	headers     http.Header
-	disableGzip bool
-
-	writerFunc func(io.Writer) io.Writer
-
-	writer io.Writer
+	disableGzip bool // Флаг для отключения сжатия
 }
 
 // WriteHeader сохраняет заголовки и статус.
@@ -78,28 +78,30 @@ func (w *gzipResponseWriter) WriteHeader(statusCode int) {
 }
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {
-	// Случай 1: Сжатие отключено (например, для редиректа) или тело пустое.
+	// Если сжатие отключено или тело пустое, пишем напрямую в исходный ResponseWriter.
 	if w.disableGzip || len(b) == 0 {
+
 		if !w.wroteHeader {
 			w.WriteHeader(http.StatusOK)
 		}
-		// Пишем напрямую в исходный ResponseWriter, без всякого gzip.
+
+		// Записываем сохраненные заголовки и статус
 		w.ResponseWriter.WriteHeader(w.status)
+		for k, vv := range w.headers {
+			w.ResponseWriter.Header()[k] = vv
+		}
 		return w.ResponseWriter.Write(b)
 	}
 
-	if w.writer == w.ResponseWriter {
-		// Создаем gzip.Writer, который будет писать в исходный ResponseWriter.
-		gw := w.writerFunc(w.ResponseWriter)
-		w.writer = gw
-
-		// Устанавливаем заголовок о сжатии.
-		w.ResponseWriter.Header().Set("Content-Encoding", "gzip")
-
-		// Записываем статус-код и накопленные заголовки.
-		w.ResponseWriter.WriteHeader(w.status)
+	// Если мы дошли сюда, значит есть тело и его нужно сжать.
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
 	}
 
-	// Пишем сжатые данные в наш (теперь уже точно) gzip.Writer.
-	return w.writer.Write(b)
+	// Устанавливаем заголовок о сжатии перед отправкой данных
+	w.ResponseWriter.Header().Set("Content-Encoding", "gzip")
+	// Записываем статус и остальные заголовки
+	w.ResponseWriter.WriteHeader(w.status)
+
+	return w.Writer.Write(b)
 }

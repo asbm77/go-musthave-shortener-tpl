@@ -2,7 +2,6 @@ package main
 
 //10
 import (
-	"io"
 	"net/http"
 	"time"
 
@@ -61,27 +60,13 @@ func main() {
 	r.Use(LoggingMiddleware)
 
 	r.Get("/{id}", redirectToOriginal(store))
-	r.Post("/", apiPost(store))
-	r.Post("/api/shorten", apiPostShorten(store))
 
-	handlerWithGzip := gzipResponseMiddleware(r)
+	api := r.With(gzipRequestMiddleware, gzipResponseMiddleware)
 
-	// 2. Оборачиваем результат в gzipRequestMiddleware
-	handlerWithGzipAndDecompress := gzipRequestMiddleware(handlerWithGzip)
+	api.Post("/", apiPost(store))
+	api.Post("/api/shorten", apiPostShorten(store))
 
-	finalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-		if gzw, ok := w.(*gzipResponseWriter); ok {
-			if c, ok := gzw.writer.(io.Closer); ok {
-				defer c.Close()
-			}
-		}
-
-		// Передаем управление дальше по цепочке (middleware + хендлеры)
-		handlerWithGzipAndDecompress.ServeHTTP(w, r)
-	})
-
-	err := http.ListenAndServe(flagRunAddr, finalHandler)
+	err := http.ListenAndServe(flagRunAddr, r)
 	if err != nil {
 		panic(err)
 	}

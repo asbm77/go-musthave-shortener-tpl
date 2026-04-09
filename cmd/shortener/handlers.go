@@ -125,6 +125,6 @@ func redirectToOriginal(store Storage) http.HandlerFunc {
 			return
 		}
 
-		http.Redirect(res, req, originalURL, http.StatusMovedPermanently)
+		http.Redirect(res, req, originalURL, http.StatusTemporaryRedirect)
 	}
 }

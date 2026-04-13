@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	//"shortener/storage"
 
 	"github.com/google/uuid"
@@ -88,6 +90,17 @@ func apiPostShorten(store Storage) http.HandlerFunc {
 			return
 		}
 
+		if req.URL == "" {
+			http.Error(w, "'url' field is required", http.StatusBadRequest)
+			return
+		}
+
+		// Валидация URL: должен содержать схему (http:// или https://)
+		if !isValidURL(req.URL) {
+			http.Error(w, "URL must include protocol (http:// or https://)", http.StatusBadRequest)
+			return
+		}
+
 		// 3. Генерируем короткий ключ и полный URL
 		shortKey := "/" + uuid.NewString()[:8]
 		shortURL := flagShortAddr + shortKey
@@ -115,12 +128,15 @@ func apiPostShorten(store Storage) http.HandlerFunc {
 func redirectHandler(store Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Path
-		// Извлекаем ключ из пути, например, /abc123 → abc123
-		//key := strings.TrimPrefix(path, "/")
+
+		if id == "" {
+			http.NotFound(w, r)
+			return
+		}
 
 		originalURL, err := store.Get(id)
 		if err != nil {
-			if err == ErrNotFound {
+			if errors.Is(err, ErrNotFound) {
 				http.NotFound(w, r)
 				return
 			}
@@ -129,6 +145,25 @@ func redirectHandler(store Storage) http.HandlerFunc {
 			return
 		}
 
+		// Проверка на пустой URL
+		if originalURL == "" {
+			log.Printf("Empty URL found for key: %s", id)
+			http.NotFound(w, r)
+			return
+		}
+
+		// Дополнительная проверка корректности URL
+		if !isValidURL(originalURL) {
+			log.Printf("Invalid URL format in storage for key %s: %s", id, originalURL)
+			http.Error(w, "Invalid redirect URL", http.StatusInternalServerError)
+			return
+		}
+
 		http.Redirect(w, r, originalURL, http.StatusTemporaryRedirect)
 	}
+}
+
+func isValidURL(urlString string) bool {
+	parsed, err := url.Parse(urlString)
+	return err == nil && parsed.Scheme != "" && parsed.Host != ""
 }

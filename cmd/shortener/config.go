@@ -23,7 +23,7 @@ func parseFlags() {
 		flagShortAddr = envShortAddr
 	}
 
-	if envFileBD := os.Getenv("FILE_BD"); envFileBD != "" {
+	if envFileBD := os.Getenv("FILE_STORAGE_PATH"); envFileBD != "" {
 		flagFileBD = envFileBD
 	}
 }

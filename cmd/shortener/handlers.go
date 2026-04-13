@@ -6,8 +6,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strings"
-
 	//"shortener/storage"
 
 	"github.com/google/uuid"
@@ -116,11 +114,11 @@ func apiPostShorten(store Storage) http.HandlerFunc {
 
 func redirectHandler(store Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
+		id := r.URL.Path
 		// Извлекаем ключ из пути, например, /abc123 → abc123
-		key := strings.TrimPrefix(path, "/")
+		//key := strings.TrimPrefix(path, "/")
 
-		originalURL, err := store.Get(key)
+		originalURL, err := store.Get(id)
 		if err != nil {
 			if err == ErrNotFound {
 				http.NotFound(w, r)

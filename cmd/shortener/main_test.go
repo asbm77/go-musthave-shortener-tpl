@@ -2,168 +2,159 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// MockStorage — заглушка для тестирования.
-type MockStorage struct {
-	SetCalls []SetCall
-	GetCalls []GetCall
-
-	SetErrorToReturn error
-	GetValueToReturn string
-	GetErrorToReturn error
+// --- Мок хранилища ---
+// Это заглушка, которая позволяет нам симулировать поведение реального хранилища.
+type StorageMock struct {
+	SetFn    func(key, url string) error
+	GetFn    func(key string) (string, error)
+	DeleteFn func(key string) error
 }
 
-type SetCall struct {
-	Key   string
-	Value string
-}
-type GetCall struct {
-	Key string
+func (m *StorageMock) Set(key, url string) error {
+	return m.SetFn(key, url)
 }
 
-func (m *MockStorage) Set(key, value string) error {
-	m.SetCalls = append(m.SetCalls, SetCall{Key: key, Value: value})
-	return m.SetErrorToReturn
+func (m *StorageMock) Get(key string) (string, error) {
+	return m.GetFn(key)
 }
-func (m *MockStorage) Get(key string) (string, error) {
-	m.GetCalls = append(m.GetCalls, GetCall{Key: key})
-	return m.GetValueToReturn, m.GetErrorToReturn
-}
-func (m *MockStorage) Delete(key string) error {
+
+func (m *StorageMock) Delete(key string) error {
+	// Реализация может быть пустой или возвращать ошибку,
+	// если вы хотите проверить сценарии с ошибкой удаления.
+	if m.DeleteFn != nil {
+		return m.DeleteFn(key)
+	}
 	return nil
 }
 
-//const flagShortAddr = "http://short.url"
-
-// --- ТЕСТЫ ДЛЯ apiGet ---
-func Test_apiGet(t *testing.T) {
-	t.Run("Успешное перенаправление: URL найден", func(t *testing.T) {
-		mockStore := &MockStorage{
-			GetValueToReturn: "https://example.com",
-			GetErrorToReturn: nil, // Ошибки нет
-		}
-		handler := apiGet(mockStore)
-
-		req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
-		res := httptest.NewRecorder()
-
-		handler.ServeHTTP(res, req)
-
-		if res.Code != http.StatusTemporaryRedirect {
-			t.Errorf("Ожидался статус %d, получен %d", http.StatusTemporaryRedirect, res.Code)
-		}
-	})
-
-	t.Run("Ошибка 404: URL не найден", func(t *testing.T) {
-		// ИСПРАВЛЕНИЕ ЗДЕСЬ:
-		// Мы симулируем ситуацию, когда ключ не найден.
-		// Для этого нужно вернуть специальную ошибку ErrNotFound.
-		mockStore := &MockStorage{
-			// GetValueToReturn можно оставить пустым или указать что угодно,
-			// так как при ошибке значение обычно не проверяется.
-			GetValueToReturn: "",
-			GetErrorToReturn: ErrNotFound, // <-- Возвращаем ошибку "не найдено"
-		}
-		handler := apiGet(mockStore)
-
-		req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
-		res := httptest.NewRecorder()
-
-		handler.ServeHTTP(res, req)
-
-		if res.Code != http.StatusNotFound {
-			t.Errorf("Ожидался статус %d, получен %d", http.StatusNotFound, res.Code)
-		}
-	})
+// --- Вспомогательная функция для тестов ---
+// Упрощает создание и выполнение HTTP-запросов.
+func performRequest(handler http.HandlerFunc, method, path string, body []byte) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "text/plain") // Для apiPost
+	if method == http.MethodPost && strings.Contains(path, "shorten") {
+		req.Header.Set("Content-Type", "application/json") // Для apiPostShorten
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	return rr
 }
 
-// --- ТЕСТЫ ДЛЯ apiPost ---
-func Test_apiPost(t *testing.T) {
-	t.Run("Успешное создание короткой ссылки", func(t *testing.T) {
-		mockStore := &MockStorage{} // Ошибок нет по умолчанию
+// --- Тесты для apiPost (Plain Text) ---
+func TestApiPost_Success(t *testing.T) {
+	mockStore := &StorageMock{
+		SetFn: func(key, url string) error {
+			assert.Contains(t, url, "example.com")
+			assert.Len(t, key, 8)
+			return nil
+		},
+	}
+	handler := apiPost(mockStore)
 
-		handler := apiPost(mockStore)
+	rr := performRequest(handler, http.MethodPost, "/", []byte("https://example.com"))
 
-		reqBody := bytes.NewBufferString("https://yandex.ru")
-		req := httptest.NewRequest(http.MethodPost, "/api/shorten", reqBody)
-		res := httptest.NewRecorder()
+	assert.Equal(t, http.StatusCreated, rr.Code)
+	assert.NotEmpty(t, rr.Body.String())
+	assert.True(t, strings.HasPrefix(rr.Body.String(), flagShortAddr+"/"))
+}
 
-		handler.ServeHTTP(res, req)
+func TestApiPost_StorageError(t *testing.T) {
+	mockStore := &StorageMock{
+		SetFn: func(key, url string) error {
+			return errors.New("db connection failed")
+		},
+	}
+	handler := apiPost(mockStore)
 
-		if res.Code != http.StatusCreated {
-			t.Errorf("Ожидался статус %d, получен %d", http.StatusCreated, res.Code)
-		}
+	rr := performRequest(handler, http.MethodPost, "/", []byte("https://example.com"))
 
-		body := res.Body.String()
-		if !bytes.Contains(res.Body.Bytes(), []byte(flagShortAddr+"/")) {
-			t.Errorf("Ответ не содержит короткий URL. Тело: %s", body)
-		}
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	assert.Contains(t, rr.Body.String(), "Internal Server Error")
+}
 
-		if len(mockStore.SetCalls) != 1 {
-			t.Fatalf("Ожидался 1 вызов store.Set, было %d вызовов", len(mockStore.SetCalls))
-		}
+// --- Тесты для apiPostShorten (JSON API) ---
+func TestApiPostShorten_Success(t *testing.T) {
+	mockStore := &StorageMock{
+		SetFn: func(key, url string) error {
+			assert.Equal(t, "https://example.com", url)
+			return nil
+		},
+	}
+	handler := apiPostShorten(mockStore)
+	body, _ := json.Marshal(ShortenRequest{URL: "https://example.com"})
 
-		call := mockStore.SetCalls[0]
+	rr := performRequest(handler, http.MethodPost, "/api/shorten", body)
 
-		if call.Value != "https://yandex.ru" {
-			t.Errorf("Ожидалось сохранение URL 'https://yandex.ru', сохранено '%s'", call.Value)
-		}
+	assert.Equal(t, http.StatusCreated, rr.Code)
+	assert.Equal(t, "application/json", rr.Header().Get("Content-Type"))
 
-		if call.Key == "" || len(call.Key) < 2 { // Проверяем, что ключ не пустой и имеет префикс "/"
-			t.Errorf("Ключ для сохранения сгенерирован некорректно: %s", call.Key)
-		}
+	var resp ShortenResponse
+	err := json.Unmarshal(rr.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(resp.Result, flagShortAddr+"/"))
+}
 
-	})
+func TestApiPostShorten_InvalidJSON(t *testing.T) {
+	mockStore := &StorageMock{}
+	handler := apiPostShorten(mockStore)
+	body := []byte("{invalid json}")
 
-	t.Run("Некорректный метод (GET)", func(t *testing.T) {
-		mockStore := &MockStorage{}
+	rr := performRequest(handler, http.MethodPost, "/api/shorten", body)
 
-		handler := apiPost(mockStore)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "Bad Request: Invalid JSON")
+}
 
-		req := httptest.NewRequest(http.MethodGet, "/api/shorten", nil)
-		res := httptest.NewRecorder()
+func TestApiPostShorten_InvalidURLFormat(t *testing.T) {
+	mockStore := &StorageMock{}
+	handler := apiPostShorten(mockStore)
+	body, _ := json.Marshal(ShortenRequest{URL: "invalid_url"})
 
-		handler.ServeHTTP(res, req)
+	rr := performRequest(handler, http.MethodPost, "/api/shorten", body)
 
-		if res.Code != http.StatusBadRequest {
-			t.Errorf("Ожидался статус %d, получен %d", http.StatusBadRequest, res.Code)
-		}
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "URL must include protocol")
+}
 
-		if len(mockStore.SetCalls) > 0 {
-			t.Error("Метод store.Set не должен был вызываться")
-		}
+// --- Тесты для redirectHandler ---
+func TestRedirectHandler_Success(t *testing.T) {
+	mockStore := &StorageMock{
+		GetFn: func(key string) (string, error) {
+			return "https://example.com", nil
+		},
+	}
+	handler := redirectHandler(mockStore)
+	req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
+	rr := httptest.NewRecorder()
 
-	})
+	handler.ServeHTTP(rr, req)
 
-	t.Run("Ошибка хранилища возвращает 500", func(t *testing.T) {
-		mockStore := &MockStorage{
-			SetErrorToReturn: errors.New("база данных недоступна"),
-		}
+	assert.Equal(t, http.StatusTemporaryRedirect, rr.Code)
+	assert.Equal(t, "https://example.com", rr.Header().Get("Location"))
+}
 
-		handler := apiPost(mockStore)
+func TestRedirectHandler_NotFound(t *testing.T) {
+	mockStore := &StorageMock{
+		GetFn: func(key string) (string, error) {
+			return "", ErrNotFound
+		},
+	}
+	handler := redirectHandler(mockStore)
+	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
+	rr := httptest.NewRecorder()
 
-		reqBody := bytes.NewBufferString("https://google.com")
-		req := httptest.NewRequest(http.MethodPost, "/api/shorten", reqBody)
-		res := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
 
-		handler.ServeHTTP(res, req)
-
-		if res.Code != http.StatusInternalServerError {
-			t.Errorf("Ожидался статус %d, получен %d", http.StatusInternalServerError, res.Code)
-		}
-
-		if res.Body.String() != "Internal Server Error\n" {
-			t.Errorf("Неожиданное тело ответа: %s", res.Body.String())
-		}
-
-		if len(mockStore.SetCalls) != 1 { // Хендлер попытался вызвать Set, но получил ошибку
-			t.Error("Метод store.Set должен был быть вызван")
-		}
-
-	})
+	assert.Equal(t, http.StatusNotFound, rr.Code)
 }

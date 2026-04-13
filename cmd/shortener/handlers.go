@@ -38,8 +38,8 @@ func apiPost(store Storage) http.HandlerFunc {
 		defer req.Body.Close()
 
 		url := string(body)
-		shortUrla := uuid.NewString()[:8]
-		shortUrlares := flagShortAddr + "/" + shortUrla
+		shortUrla := "/" + uuid.NewString()[:8]
+		shortUrlares := flagShortAddr + shortUrla
 
 		if err := store.Set(shortUrla, url); err != nil {
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
@@ -102,9 +102,8 @@ func apiPostShorten(store Storage) http.HandlerFunc {
 			return
 		}
 
-		// 5. Генерируем короткий ключ БЕЗ слеша
-		shortKey := uuid.NewString()[:8]           // без слеша
-		shortURL := flagShortAddr + "/" + shortKey // слеш добавляем только в полный URL
+		shortKey := "/" + uuid.NewString()[:8]
+		shortURL := flagShortAddr + shortKey
 
 		log.Printf("Saving URL for key %q: %q", shortKey, req.URL)
 

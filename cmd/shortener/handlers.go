@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 
 	//"shortener/storage"
 
@@ -113,26 +114,23 @@ func apiPostShorten(store Storage) http.HandlerFunc {
 	}
 }
 
-func redirectToOriginal(store Storage) http.HandlerFunc {
-	return func(res http.ResponseWriter, req *http.Request) {
+func redirectHandler(store Storage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		// Извлекаем ключ из пути, например, /abc123 → abc123
+		key := strings.TrimPrefix(path, "/")
 
-		//id := chi.URLParam(r, "*")
-		id := req.URL.Path
-
-		originalURL, err := store.Get(id)
+		originalURL, err := store.Get(key)
 		if err != nil {
-			http.NotFound(res, req)
+			if err == ErrNotFound {
+				http.NotFound(w, r)
+				return
+			}
+			log.Printf("Storage error in redirect: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
 
-		res.WriteHeader(http.StatusTemporaryRedirect)
-		res.Header().Set("Location", originalURL)
-
-		if gzw, ok := res.(*gzipResponseWriter); ok {
-			gzw.disableGzip = true
-			return
-		}
-
-		http.Redirect(res, req, originalURL, http.StatusTemporaryRedirect)
+		http.Redirect(w, r, originalURL, http.StatusTemporaryRedirect)
 	}
 }

@@ -63,8 +63,8 @@ func main() {
 
 	r.Get("/{id}", redirectHandler(store))
 
-	r.Post("/", apiPost(store))
 	r.Post("/api/shorten", apiPostShorten(store))
+	r.Post("/", apiPost(store))
 
 	err := http.ListenAndServe(flagRunAddr, r)
 	if err != nil {

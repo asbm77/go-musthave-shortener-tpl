@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
+
 	//"shortener/storage"
 
 	"github.com/google/uuid"
@@ -38,8 +40,8 @@ func apiPost(store Storage) http.HandlerFunc {
 		defer req.Body.Close()
 
 		url := string(body)
-		shortUrla := "/" + uuid.NewString()[:8]
-		shortUrlares := flagShortAddr + shortUrla
+		shortUrla := uuid.NewString()[:8]
+		shortUrlares := flagShortAddr + "/" + shortUrla
 
 		if err := store.Set(shortUrla, url); err != nil {
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
@@ -102,8 +104,8 @@ func apiPostShorten(store Storage) http.HandlerFunc {
 			return
 		}
 
-		shortKey := "/" + uuid.NewString()[:8]
-		shortURL := flagShortAddr + shortKey
+		shortKey := uuid.NewString()[:8]
+		shortURL := flagShortAddr + "/" + shortKey
 
 		log.Printf("Saving URL for key %q: %q", shortKey, req.URL)
 
@@ -130,7 +132,7 @@ func apiPostShorten(store Storage) http.HandlerFunc {
 
 func redirectHandler(store Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.URL.Path
+		id := strings.TrimPrefix(r.URL.Path, "/")
 
 		if id == "" {
 			http.NotFound(w, r)

@@ -7,10 +7,12 @@ import (
 
 var flagRunAddr string
 var flagShortAddr string
+var flagFileBD string
 
 func parseFlags() {
 	flag.StringVar(&flagRunAddr, "a", "localhost:8080", "address and port to run server")
 	flag.StringVar(&flagShortAddr, "b", "http://localhost:8080", "address and port short url")
+	flag.StringVar(&flagFileBD, "f", "file_bd.txt", "file bd")
 	flag.Parse()
 
 	if envRunAddr := os.Getenv("SERVER_ADDRESS"); envRunAddr != "" {
@@ -19,5 +21,9 @@ func parseFlags() {
 
 	if envShortAddr := os.Getenv("BASE_URL"); envShortAddr != "" {
 		flagShortAddr = envShortAddr
+	}
+
+	if envFile_BD := os.Getenv("FILE_BD"); envFile_BD != "" {
+		flagFileBD = envFile_BD
 	}
 }

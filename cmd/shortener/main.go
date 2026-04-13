@@ -2,7 +2,11 @@ package main
 
 //10
 import (
+	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
@@ -54,6 +58,25 @@ func main() {
 	parseFlags()
 
 	store := NewInMemoryStorage()
+
+	if err := store.LoadFromFile(flagFileBD); err != nil {
+		log.Fatalf("Ошибка загрузки данных: %v", err)
+	}
+
+	// Обработчик завершения работы — сохраняем данные перед выходом
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-c
+		log.Println("Получен сигнал завершения, сохраняем данные...")
+		if err := store.SaveToFile(flagFileBD); err != nil {
+			log.Printf("Ошибка сохранения данных: %v", err)
+		} else {
+			log.Println("Данные успешно сохранены")
+		}
+		os.Exit(0)
+	}()
 
 	r := chi.NewRouter()
 

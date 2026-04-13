@@ -57,10 +57,9 @@ func main() {
 
 	r := chi.NewRouter()
 
-	r.Use(LoggingMiddleware)
-
 	r.Use(UnzipMiddleware)
 	r.Use(GzipMiddlewareWithContentType)
+	r.Use(LoggingMiddleware)
 
 	r.Get("/{id}", redirectHandler(store))
 

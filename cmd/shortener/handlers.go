@@ -90,11 +90,6 @@ func apiPostShorten(store Storage) http.HandlerFunc {
 			return
 		}
 
-		if req.URL == "" {
-			http.Error(w, "'url' field is required", http.StatusBadRequest)
-			return
-		}
-
 		// Валидация URL: должен содержать схему (http:// или https://)
 		if !isValidURL(req.URL) {
 			http.Error(w, "URL must include protocol (http:// or https://)", http.StatusBadRequest)
@@ -102,11 +97,20 @@ func apiPostShorten(store Storage) http.HandlerFunc {
 		}
 
 		// 3. Генерируем короткий ключ и полный URL
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "400 Bad Request", http.StatusBadRequest)
+			return
+		}
+
+		defer r.Body.Close()
+
+		url := string(body)
 		shortKey := "/" + uuid.NewString()[:8]
 		shortURL := flagShortAddr + shortKey
 
 		// 4. Сохраняем в хранилище
-		if err := store.Set(shortKey, req.URL); err != nil {
+		if err := store.Set(shortKey, url); err != nil {
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			log.Printf("Ошибка сохранения в хранилище: %v", err)
 			return

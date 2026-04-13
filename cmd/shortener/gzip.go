@@ -17,8 +17,6 @@ func (g *gzipResponseWriter) Write(b []byte) (int, error) {
 	return g.Writer.Write(b)
 }
 
-// UnzipMiddleware decompresses incoming GZIP‑encoded request bodies.
-// It checks for the "Content-Encoding: gzip" header and unzips the body if present.
 func UnzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Content-Encoding") == "gzip" {
@@ -29,9 +27,9 @@ func UnzipMiddleware(next http.Handler) http.Handler {
 			}
 			defer gz.Close()
 
-			// Replace the request body with the uncompressed version
+			// Заменяем тело запроса на распакованное
 			r.Body = gz
-			// Remove the header to prevent further decompression attempts
+			// Удаляем заголовок, чтобы последующие обработчики не пытались распаковать снова
 			r.Header.Del("Content-Encoding")
 		}
 

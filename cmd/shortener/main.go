@@ -61,7 +61,7 @@ func main() {
 	r.Use(GzipMiddlewareWithContentType)
 	r.Use(LoggingMiddleware)
 
-	r.Get("/{id}", redirectHandler(store))
+	r.Get("{id}", redirectHandler(store))
 
 	r.Post("/", apiPost(store))
 	r.Post("/api/shorten", apiPostShorten(store))

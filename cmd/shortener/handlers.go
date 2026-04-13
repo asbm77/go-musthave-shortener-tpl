@@ -38,9 +38,8 @@ func apiPost(store Storage) http.HandlerFunc {
 		defer req.Body.Close()
 
 		url := string(body)
-		shortUrla := "/" + uuid.NewString()[:8]
-		//urlMap[shortUrla] = url
-		shortUrlares := flagShortAddr + shortUrla
+		shortUrla := uuid.NewString()[:8]
+		shortUrlares := flagShortAddr + "/" + shortUrla
 
 		if err := store.Set(shortUrla, url); err != nil {
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
@@ -85,45 +84,46 @@ func apiPostShorten(store Storage) http.HandlerFunc {
 		// 2. Декодируем JSON из тела запроса
 		var req ShortenRequest
 		err := json.NewDecoder(r.Body).Decode(&req)
-		if err != nil || req.URL == "" {
-			http.Error(w, "Bad Request: Invalid JSON or missing 'url'", http.StatusBadRequest)
+		if err != nil {
+			log.Printf("JSON decode error: %v", err)
+			http.Error(w, "Bad Request: Invalid JSON", http.StatusBadRequest)
 			return
 		}
 
-		// Валидация URL: должен содержать схему (http:// или https://)
+		// 3. Проверяем наличие URL
+		if req.URL == "" {
+			http.Error(w, "'url' field is required", http.StatusBadRequest)
+			return
+		}
+
+		// 4. Валидация URL: должен содержать схему (http:// или https://)
 		if !isValidURL(req.URL) {
 			http.Error(w, "URL must include protocol (http:// or https://)", http.StatusBadRequest)
 			return
 		}
 
-		// 3. Генерируем короткий ключ и полный URL
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "400 Bad Request", http.StatusBadRequest)
-			return
-		}
+		// 5. Генерируем короткий ключ БЕЗ слеша
+		shortKey := uuid.NewString()[:8]           // без слеша
+		shortURL := flagShortAddr + "/" + shortKey // слеш добавляем только в полный URL
 
-		defer r.Body.Close()
+		log.Printf("Saving URL for key %q: %q", shortKey, req.URL)
 
-		url := string(body)
-		shortKey := "/" + uuid.NewString()[:8]
-		shortURL := flagShortAddr + shortKey
-
-		// 4. Сохраняем в хранилище
-		if err := store.Set(shortKey, url); err != nil {
+		// 6. Сохраняем в хранилище
+		if err := store.Set(shortKey, req.URL); err != nil {
+			log.Printf("Storage error in apiPostShorten: %v", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			log.Printf("Ошибка сохранения в хранилище: %v", err)
 			return
 		}
+		log.Printf("URL saved successfully for key %q", shortKey)
 
-		// 5. Формируем и отправляем JSON-ответ
+		// 7. Формируем и отправляем JSON-ответ
 		response := ShortenResponse{Result: shortURL}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 
 		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Error encoding response: %v", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			log.Printf("Ошибка кодирования ответа: %v", err)
 			return
 		}
 	}

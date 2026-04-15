@@ -75,6 +75,21 @@ func apiGet(store Storage) http.HandlerFunc {
 	}
 }
 
+func apiGetPing(store Storage) http.HandlerFunc {
+	return func(res http.ResponseWriter, req *http.Request) {
+
+		//config := GetDefaultConfig()
+		err := InitDB()
+		if err != nil {
+			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		defer CloseDB()
+
+		res.WriteHeader(http.StatusOK)
+	}
+}
+
 func apiPostShorten(store Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 1. Проверяем метод запроса

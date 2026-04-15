@@ -85,6 +85,7 @@ func main() {
 	r.Use(LoggingMiddleware)
 
 	r.Get("/{id}", redirectHandler(store))
+	r.Get("/ping", apiGetPing(store))
 
 	r.Post("/api/shorten", apiPostShorten(store))
 	r.Post("/", apiPost(store))

@@ -8,7 +8,10 @@ import (
 
 var DB *sql.DB
 
-func InitDB() error {
+var initDBFunc = InitDBImpl
+
+// InitDBImpl — реальная реализация подключения к БД
+func InitDBImpl() error {
 	connStr := flagConnDB
 
 	db, err := sql.Open("postgres", connStr)
@@ -25,6 +28,12 @@ func InitDB() error {
 	DB = db
 	log.Println("Успешное подключение к PostgreSQL")
 	return nil
+	return nil // или ошибка подключения
+}
+
+// InitDB — функция, которую вызывает apiGetPing
+func InitDB() error {
+	return initDBFunc()
 }
 
 // CloseDB закрывает соединение с БД

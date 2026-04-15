@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -49,6 +50,59 @@ func performRequest(handler http.HandlerFunc, method, path string, body []byte) 
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	return rr
+}
+
+// TestApiGetPing_Success — тест успешного подключения к БД и ответа 200
+func TestApiGetPing_Success(t *testing.T) {
+	// Сохраняем оригинал и устанавливаем мок
+	original := initDBFunc
+	initDBFunc = func() error { return nil }
+	defer func() { initDBFunc = original }() // Восстанавливаем после теста
+
+	store := &StorageMock{}
+	handler := apiGetPing(store)
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	// Проверяем статус-код
+	if w.Code != http.StatusOK {
+		t.Errorf("Ожидаемый статус %d, получен %d", http.StatusOK, w.Code)
+	}
+
+	// Проверяем, что тело ответа пустое
+	if w.Body.String() != "" {
+		t.Errorf("Ожидалось пустое тело ответа, получено: %q", w.Body.String())
+	}
+}
+
+// TestApiGetPing_DBError — тест ошибки подключения к БД (500)
+func TestApiGetPing_DBError(t *testing.T) {
+	// Сохраняем оригинал и устанавливаем мок с ошибкой
+	original := initDBFunc
+	initDBFunc = func() error { return fmt.Errorf("ошибка подключения к БД") }
+	defer func() { initDBFunc = original }()
+
+	store := &StorageMock{}
+	handler := apiGetPing(store)
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	// Проверяем статус-код
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("Ожидаемый статус %d, получен %d", http.StatusInternalServerError, w.Code)
+	}
+
+	// Проверяем сообщение об ошибке
+	expectedBody := "Internal Server Error\n"
+	if w.Body.String() != expectedBody {
+		t.Errorf("Ожидаемое тело ответа %q, получено %q", expectedBody, w.Body.String())
+	}
 }
 
 // --- Тесты для apiPost (Plain Text) ---

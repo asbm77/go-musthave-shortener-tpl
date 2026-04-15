@@ -28,7 +28,7 @@ func InitDBImpl() error {
 	DB = db
 	log.Println("Успешное подключение к PostgreSQL")
 	return nil
-	return nil // или ошибка подключения
+
 }
 
 // InitDB — функция, которую вызывает apiGetPing

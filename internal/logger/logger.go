@@ -1,12 +1,31 @@
 package logger
 
 import (
+	"os"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"os"
 )
 
 var Logger *zap.SugaredLogger
+
+func Initialize(level string) error {
+	var config zap.Config
+
+	if level == "debug" {
+		config = zap.NewDevelopmentConfig()
+	} else {
+		config = zap.NewProductionConfig()
+	}
+
+	logger, err := config.Build()
+	if err != nil {
+		return err
+	}
+
+	Logger = logger.Sugar()
+	return nil
+}
 
 func init() {
 	// Настройка энкодера для вывода в формате JSON (удобно для парсинга)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,9 +10,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
-	//"shortener/storage"
-
+	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
 	"github.com/google/uuid"
 )
 
@@ -23,7 +24,7 @@ type ShortenResponse struct {
 	Result string `json:"result"`
 }
 
-func apiPost(store Storage) http.HandlerFunc {
+func apiPost(store storage.Storage) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			http.Error(res, "400 Bad Request", http.StatusBadRequest)
@@ -43,7 +44,10 @@ func apiPost(store Storage) http.HandlerFunc {
 		shortUrla := uuid.NewString()[:8]
 		shortUrlares := flagShortAddr + "/" + shortUrla
 
-		if err := store.Set(shortUrla, url); err != nil {
+		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+		defer cancel()
+
+		if err := store.Set(ctx, shortUrla, url); err != nil {
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 
@@ -55,14 +59,17 @@ func apiPost(store Storage) http.HandlerFunc {
 	}
 }
 
-func apiGet(store Storage) http.HandlerFunc {
+func apiGet(store storage.Storage) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
+
+		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+		defer cancel()
 
 		id := req.URL.Path
 
-		originalURL, err := store.Get(id)
+		originalURL, err := store.Get(ctx, id)
 		if err != nil || originalURL == "" {
-			if err == ErrNotFound {
+			if err == storage.ErrNotFound {
 				http.NotFound(res, req)
 				return
 			}
@@ -75,47 +82,45 @@ func apiGet(store Storage) http.HandlerFunc {
 	}
 }
 
-func apiGetPing(store Storage) http.HandlerFunc {
+func apiGetPing(store storage.Storage) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
+		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+		defer cancel()
 
-		//config := GetDefaultConfig()
-		err := InitDB()
-		if err != nil {
-			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
+		if err := store.Ping(ctx); err != nil {
+			res.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		defer CloseDB()
-
 		res.WriteHeader(http.StatusOK)
 	}
 }
 
-func apiPostShorten(store Storage) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func apiPostShorten(store storage.Storage) http.HandlerFunc {
+	return func(res http.ResponseWriter, req *http.Request) {
 		// 1. Проверяем метод запроса
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if req.Method != http.MethodPost {
+			http.Error(res, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
 		// 2. Декодируем JSON из тела запроса
-		var req ShortenRequest
-		err := json.NewDecoder(r.Body).Decode(&req)
+		var sreq ShortenRequest
+		err := json.NewDecoder(req.Body).Decode(&req)
 		if err != nil {
 			log.Printf("JSON decode error: %v", err)
-			http.Error(w, "Bad Request: Invalid JSON", http.StatusBadRequest)
+			http.Error(res, "Bad Request: Invalid JSON", http.StatusBadRequest)
 			return
 		}
 
 		// 3. Проверяем наличие URL
-		if req.URL == "" {
-			http.Error(w, "'url' field is required", http.StatusBadRequest)
+		if sreq.URL == "" {
+			http.Error(res, "'url' field is required", http.StatusBadRequest)
 			return
 		}
 
 		// 4. Валидация URL: должен содержать схему (http:// или https://)
-		if !isValidURL(req.URL) {
-			http.Error(w, "URL must include protocol (http:// or https://)", http.StatusBadRequest)
+		if !isValidURL(sreq.URL) {
+			http.Error(res, "URL must include protocol (http:// or https://)", http.StatusBadRequest)
 			return
 		}
 
@@ -124,62 +129,68 @@ func apiPostShorten(store Storage) http.HandlerFunc {
 
 		log.Printf("Saving URL for key %q: %q", shortKey, req.URL)
 
+		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+		defer cancel()
+
 		// 6. Сохраняем в хранилище
-		if err := store.Set(shortKey, req.URL); err != nil {
+		if err := store.Set(ctx, shortKey, sreq.URL); err != nil {
 			log.Printf("Storage error in apiPostShorten: %v", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
 		log.Printf("URL saved successfully for key %q", shortKey)
 
 		// 7. Формируем и отправляем JSON-ответ
 		response := ShortenResponse{Result: shortURL}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
+		res.Header().Set("Content-Type", "application/json")
+		res.WriteHeader(http.StatusCreated)
 
-		if err := json.NewEncoder(w).Encode(response); err != nil {
+		if err := json.NewEncoder(res).Encode(response); err != nil {
 			log.Printf("Error encoding response: %v", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
 	}
 }
 
-func redirectHandler(store Storage) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := strings.TrimPrefix(r.URL.Path, "/")
+func redirectHandler(store storage.Storage) http.HandlerFunc {
+	return func(res http.ResponseWriter, req *http.Request) {
+		id := strings.TrimPrefix(req.URL.Path, "/")
 
 		if id == "" {
-			http.NotFound(w, r)
+			http.NotFound(res, req)
 			return
 		}
 
-		originalURL, err := store.Get(id)
+		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+		defer cancel()
+
+		originalURL, err := store.Get(ctx, id)
 		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				http.NotFound(w, r)
+			if errors.Is(err, storage.ErrNotFound) {
+				http.NotFound(res, req)
 				return
 			}
 			log.Printf("Storage error in redirect: %v", err)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
 
 		// Проверка на пустой URL
 		if originalURL == "" {
 			log.Printf("Empty URL found for key: %s", id)
-			http.NotFound(w, r)
+			http.NotFound(res, req)
 			return
 		}
 
 		// Дополнительная проверка корректности URL
 		if !isValidURL(originalURL) {
 			log.Printf("Invalid URL format in storage for key %s: %s", id, originalURL)
-			http.Error(w, "Invalid redirect URL", http.StatusInternalServerError)
+			http.Error(res, "Invalid redirect URL", http.StatusInternalServerError)
 			return
 		}
 
-		http.Redirect(w, r, originalURL, http.StatusTemporaryRedirect)
+		http.Redirect(res, req, originalURL, http.StatusTemporaryRedirect)
 	}
 }
 

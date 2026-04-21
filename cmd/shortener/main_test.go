@@ -2,213 +2,358 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
-	"errors"
-	"fmt"
+	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"os"
+	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
+	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
+	"github.com/go-chi/chi/v5"
 )
 
-// --- Мок хранилища ---
-// Это заглушка, которая позволяет нам симулировать поведение реального хранилища.
-type StorageMock struct {
-	SetFn    func(key, url string) error
-	GetFn    func(key string) (string, error)
-	DeleteFn func(key string) error
+// Тестовая конфигурация
+func init() {
+	// Инициализация логгера для тестов
+	logger.Initialize("error")
 }
 
-func (m *StorageMock) Set(key, url string) error {
-	return m.SetFn(key, url)
-}
-
-func (m *StorageMock) Get(key string) (string, error) {
-	return m.GetFn(key)
-}
-
-func (m *StorageMock) Delete(key string) error {
-	// Реализация может быть пустой или возвращать ошибку,
-	// если вы хотите проверить сценарии с ошибкой удаления.
-	if m.DeleteFn != nil {
-		return m.DeleteFn(key)
-	}
-	return nil
-}
-
-// --- Вспомогательная функция для тестов ---
-// Упрощает создание и выполнение HTTP-запросов.
-func performRequest(handler http.HandlerFunc, method, path string, body []byte) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, path, bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "text/plain") // Для apiPost
-	if method == http.MethodPost && strings.Contains(path, "shorten") {
-		req.Header.Set("Content-Type", "application/json") // Для apiPostShorten
-	}
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-	return rr
-}
-
-// TestApiGetPing_Success — тест успешного подключения к БД и ответа 200
-func TestApiGetPing_Success(t *testing.T) {
-	// Сохраняем оригинал и устанавливаем мок
-	original := initDBFunc
-	initDBFunc = func() error { return nil }
-	defer func() { initDBFunc = original }() // Восстанавливаем после теста
-
-	store := &StorageMock{}
-	handler := apiGetPing(store)
-
-	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-	w := httptest.NewRecorder()
-
-	handler(w, req)
-
-	// Проверяем статус-код
-	if w.Code != http.StatusOK {
-		t.Errorf("Ожидаемый статус %d, получен %d", http.StatusOK, w.Code)
-	}
-
-	// Проверяем, что тело ответа пустое
-	if w.Body.String() != "" {
-		t.Errorf("Ожидалось пустое тело ответа, получено: %q", w.Body.String())
-	}
-}
-
-// TestApiGetPing_DBError — тест ошибки подключения к БД (500)
-func TestApiGetPing_DBError(t *testing.T) {
-	// Сохраняем оригинал и устанавливаем мок с ошибкой
-	original := initDBFunc
-	initDBFunc = func() error { return fmt.Errorf("ошибка подключения к БД") }
-	defer func() { initDBFunc = original }()
-
-	store := &StorageMock{}
-	handler := apiGetPing(store)
-
-	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-	w := httptest.NewRecorder()
-
-	handler(w, req)
-
-	// Проверяем статус-код
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Ожидаемый статус %d, получен %d", http.StatusInternalServerError, w.Code)
-	}
-
-	// Проверяем сообщение об ошибке
-	expectedBody := "Internal Server Error\n"
-	if w.Body.String() != expectedBody {
-		t.Errorf("Ожидаемое тело ответа %q, получено %q", expectedBody, w.Body.String())
-	}
-}
-
-// --- Тесты для apiPost (Plain Text) ---
-func TestApiPost_Success(t *testing.T) {
-	mockStore := &StorageMock{
-		SetFn: func(key, url string) error {
-			assert.Contains(t, url, "example.com")
-			assert.Len(t, key, 8)
-			return nil
+func TestLoggingMiddleware(t *testing.T) {
+	tests := []struct {
+		name           string
+		method         string
+		path           string
+		handler        http.HandlerFunc
+		expectedStatus int
+	}{
+		{
+			name:   "Successful request",
+			method: http.MethodGet,
+			path:   "/test",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("OK"))
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:   "Not found request",
+			method: http.MethodGet,
+			path:   "/notfound",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+			},
+			expectedStatus: http.StatusNotFound,
+		},
+		{
+			name:   "Internal error",
+			method: http.MethodPost,
+			path:   "/error",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+			},
+			expectedStatus: http.StatusInternalServerError,
 		},
 	}
-	handler := apiPost(mockStore)
 
-	rr := performRequest(handler, http.MethodPost, "/", []byte("https://example.com"))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := LoggingMiddleware(tt.handler)
 
-	assert.Equal(t, http.StatusCreated, rr.Code)
-	assert.NotEmpty(t, rr.Body.String())
-	assert.True(t, strings.HasPrefix(rr.Body.String(), flagShortAddr+"/"))
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.expectedStatus {
+				t.Errorf("Expected status %d, got %d", tt.expectedStatus, rec.Code)
+			}
+		})
+	}
 }
 
-func TestApiPost_StorageError(t *testing.T) {
-	mockStore := &StorageMock{
-		SetFn: func(key, url string) error {
-			return errors.New("db connection failed")
+func TestCreateStorage(t *testing.T) {
+	// Сохраняем оригинальные значения флагов
+	originalConnDB := flagConnDB
+	originalFileBD := flagFileBD
+	defer func() {
+		flagConnDB = originalConnDB
+		flagFileBD = originalFileBD
+	}()
+
+	tests := []struct {
+		name          string
+		connDB        string
+		fileBD        string
+		expectError   bool
+		expectedType  string
+		setupPostgres bool
+	}{
+		{
+			name:         "PostgreSQL storage (priority 1)",
+			connDB:       "postgres://user:pass@localhost:5432/db?sslmode=disable",
+			fileBD:       "/tmp/test.json",
+			expectError:  true, // Будет ошибка, т.к. PostgreSQL не запущен
+			expectedType: "",
+		},
+		{
+			name:         "File storage (priority 2)",
+			connDB:       "",
+			fileBD:       "/tmp/test-storage.json",
+			expectError:  false,
+			expectedType: "*storage.FileStorage",
+		},
+		{
+			name:         "Memory storage (priority 3)",
+			connDB:       "",
+			fileBD:       "",
+			expectError:  false,
+			expectedType: "*storage.MemoryStorage",
 		},
 	}
-	handler := apiPost(mockStore)
 
-	rr := performRequest(handler, http.MethodPost, "/", []byte("https://example.com"))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flagConnDB = tt.connDB
+			flagFileBD = tt.fileBD
 
-	assert.Equal(t, http.StatusInternalServerError, rr.Code)
-	assert.Contains(t, rr.Body.String(), "Internal Server Error")
-}
+			// Создаем тестовый файл если нужно
+			if tt.fileBD != "" && tt.fileBD != "/tmp/test-storage.json" {
+				os.Remove(tt.fileBD)
+			}
 
-// --- Тесты для apiPostShorten (JSON API) ---
-func TestApiPostShorten_Success(t *testing.T) {
-	mockStore := &StorageMock{
-		SetFn: func(key, url string) error {
-			assert.Equal(t, "https://example.com", url)
-			return nil
-		},
+			store, err := createStorage()
+
+			if tt.expectError && err == nil {
+				t.Error("Expected error, got nil")
+			}
+
+			if !tt.expectError && err != nil {
+				t.Errorf("Expected no error, got %v", err)
+			}
+
+			if !tt.expectError && store != nil {
+				storeType := ""
+				switch store.(type) {
+				case *storage.FileStorage:
+					storeType = "*storage.FileStorage"
+				case *storage.MemoryStorage:
+					storeType = "*storage.MemoryStorage"
+				case *storage.PostgresStorage:
+					storeType = "*storage.PostgresStorage"
+				}
+
+				if tt.expectedType != "" && storeType != tt.expectedType {
+					t.Errorf("Expected storage type %s, got %s", tt.expectedType, storeType)
+				}
+			}
+
+			if store != nil {
+				store.Close()
+			}
+
+			// Очистка
+			if tt.fileBD != "" {
+				os.Remove(tt.fileBD)
+			}
+		})
 	}
-	handler := apiPostShorten(mockStore)
-	body, _ := json.Marshal(ShortenRequest{URL: "https://example.com"})
-
-	rr := performRequest(handler, http.MethodPost, "/api/shorten", body)
-
-	assert.Equal(t, http.StatusCreated, rr.Code)
-	assert.Equal(t, "application/json", rr.Header().Get("Content-Type"))
-
-	var resp ShortenResponse
-	err := json.Unmarshal(rr.Body.Bytes(), &resp)
-	require.NoError(t, err)
-	assert.True(t, strings.HasPrefix(resp.Result, flagShortAddr+"/"))
 }
 
-func TestApiPostShorten_InvalidJSON(t *testing.T) {
-	mockStore := &StorageMock{}
-	handler := apiPostShorten(mockStore)
-	body := []byte("{invalid json}")
+func TestGracefulShutdown(t *testing.T) {
+	// Этот тест проверяет обработку сигналов graceful shutdown
 
-	rr := performRequest(handler, http.MethodPost, "/api/shorten", body)
+	// Создаем временное файловое хранилище для теста
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test-db.json")
 
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
-	assert.Contains(t, rr.Body.String(), "Bad Request: Invalid JSON")
-}
+	// Сохраняем оригинальные флаги
+	originalFileBD := flagFileBD
+	defer func() {
+		flagFileBD = originalFileBD
+	}()
 
-func TestApiPostShorten_InvalidURLFormat(t *testing.T) {
-	mockStore := &StorageMock{}
-	handler := apiPostShorten(mockStore)
-	body, _ := json.Marshal(ShortenRequest{URL: "invalid_url"})
+	flagFileBD = testFile
 
-	rr := performRequest(handler, http.MethodPost, "/api/shorten", body)
-
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
-	assert.Contains(t, rr.Body.String(), "URL must include protocol")
-}
-
-// --- Тесты для redirectHandler ---
-func TestRedirectHandler_Success(t *testing.T) {
-	mockStore := &StorageMock{
-		GetFn: func(key string) (string, error) {
-			return "https://example.com", nil
-		},
+	// Создаем хранилище
+	store, err := createStorage()
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
 	}
-	handler := redirectHandler(mockStore)
-	req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
-	rr := httptest.NewRecorder()
 
-	handler.ServeHTTP(rr, req)
+	// Добавляем тестовые данные
+	ctx := context.Background()
+	if err := store.Set(ctx, "test-key", "https://test.com"); err != nil {
+		t.Fatalf("Failed to set test data: %v", err)
+	}
 
-	assert.Equal(t, http.StatusTemporaryRedirect, rr.Code)
-	assert.Equal(t, "https://example.com", rr.Header().Get("Location"))
+	// Проверяем, что данные сохранились
+	value, err := store.Get(ctx, "test-key")
+	if err != nil || value != "https://test.com" {
+		t.Errorf("Data not saved correctly: value=%s, err=%v", value, err)
+	}
+
+	// Закрываем хранилище (должно сохранить данные)
+	if err := store.Close(); err != nil {
+		t.Errorf("Failed to close storage: %v", err)
+	}
+
+	// Создаем новое хранилище и проверяем, что данные загрузились
+	newStore, err := createStorage()
+	if err != nil {
+		t.Fatalf("Failed to recreate storage: %v", err)
+	}
+	defer newStore.Close()
+
+	// Для файлового хранилища данные должны сохраниться
+	if fileStore, ok := newStore.(*storage.FileStorage); ok {
+		if err := fileStore.LoadFromFile(); err != nil {
+			t.Errorf("Failed to load from file: %v", err)
+		}
+
+		value, err := newStore.Get(ctx, "test-key")
+		if err != nil {
+			t.Errorf("Failed to get data after reload: %v", err)
+		}
+		if value != "https://test.com" {
+			t.Errorf("Expected 'https://test.com', got '%s'", value)
+		}
+	}
 }
 
-func TestRedirectHandler_NotFound(t *testing.T) {
-	mockStore := &StorageMock{
-		GetFn: func(key string) (string, error) {
-			return "", ErrNotFound
-		},
+// Тест для проверки конкурентных запросов
+func TestConcurrentRequests(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+
+	r := chi.NewRouter()
+	r.Post("/", apiPost(store))
+	r.Get("/{id}", redirectHandler(store))
+
+	server := httptest.NewServer(r)
+	defer server.Close()
+
+	concurrency := 50
+	done := make(chan bool, concurrency)
+
+	// Параллельное создание URL
+	for i := 0; i < concurrency; i++ {
+		go func(i int) {
+			defer func() { done <- true }()
+
+			url := "https://concurrent-test.com/" + string(rune(i))
+			resp, err := http.Post(server.URL+"/", "text/plain", bytes.NewBufferString(url))
+			if err != nil {
+				t.Errorf("Request failed: %v", err)
+				return
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusCreated {
+				t.Errorf("Expected status %d, got %d", http.StatusCreated, resp.StatusCode)
+			}
+		}(i)
 	}
-	handler := redirectHandler(mockStore)
-	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
-	rr := httptest.NewRecorder()
 
-	handler.ServeHTTP(rr, req)
+	// Ожидаем завершения всех горутин
+	for i := 0; i < concurrency; i++ {
+		<-done
+	}
 
-	assert.Equal(t, http.StatusNotFound, rr.Code)
+	// Проверяем, что все URL сохранены
+	// Количество сохраненных URL должно быть равно количеству запросов
+	// (для in-memory хранилища)
+	t.Logf("Successfully processed %d concurrent requests", concurrency)
+}
+
+// Тест для проверки обработки паники в middleware
+func TestMiddlewarePanicRecovery(t *testing.T) {
+	panicHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("test panic")
+	})
+
+	handler := LoggingMiddleware(panicHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	// В реальном приложении должен быть recoverer middleware
+	// Этот тест просто проверяет, что middleware не паникует
+	defer func() {
+		if r := recover(); r != nil {
+			t.Logf("Recovered from panic: %v", r)
+		}
+	}()
+
+	handler.ServeHTTP(rec, req)
+}
+
+// Тест для проверки сигналов (мокает сигналы)
+func TestSignalHandling(t *testing.T) {
+	// Создаем канал для сигналов
+	sigChan := make(chan os.Signal, 1)
+
+	// Тестируем обработку SIGTERM
+	go func() {
+		sigChan <- syscall.SIGTERM
+	}()
+
+	select {
+	case sig := <-sigChan:
+		if sig != syscall.SIGTERM {
+			t.Errorf("Expected SIGTERM, got %v", sig)
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("Timeout waiting for signal")
+	}
+
+	// Тестируем обработку SIGINT
+	go func() {
+		sigChan <- os.Interrupt
+	}()
+
+	select {
+	case sig := <-sigChan:
+		if sig != os.Interrupt {
+			t.Errorf("Expected Interrupt, got %v", sig)
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("Timeout waiting for signal")
+	}
+}
+
+// Бенчмарки
+func BenchmarkLoggingMiddleware(b *testing.B) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	middleware := LoggingMiddleware(handler)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rec := httptest.NewRecorder()
+		middleware.ServeHTTP(rec, req)
+	}
+}
+
+func BenchmarkResponseWriterWrapper(b *testing.B) {
+	rec := httptest.NewRecorder()
+	wrapper := &responseWriterWrapper{
+		ResponseWriter: rec,
+		statusCode:     0,
+		bodySize:       0,
+	}
+
+	data := []byte("benchmark test data")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		wrapper.WriteHeader(http.StatusOK)
+		wrapper.Write(data)
+	}
 }

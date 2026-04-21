@@ -1,6 +1,5 @@
 package main
 
-//10
 import (
 	"log"
 	"net/http"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
+	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -54,29 +54,45 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func createStorage() (storage.Storage, error) {
+	// Приоритет 1: PostgreSQL
+	if flagConnDB != "" {
+		log.Println("Using PostgreSQL storage")
+		pgStorage, err := storage.NewPostgresStorage(flagConnDB)
+		if err != nil {
+			return nil, err
+		}
+
+		return pgStorage, nil
+	}
+
+	// Приоритет 2: Файловое хранилище
+	if flagFileBD != "" {
+		log.Println("Using file storage")
+		fileStorage := storage.NewFileStorage(flagFileBD)
+		if err := fileStorage.LoadFromFile(); err != nil {
+			log.Printf("Warning: failed to load from file: %v", err)
+		}
+		return fileStorage, nil
+	}
+
+	// Приоритет 3: Память
+	log.Println("Using in-memory storage")
+	return storage.NewInMemoryStorage(), nil
+}
+
 func main() {
 	parseFlags()
 
-	store := NewInMemoryStorage()
-
-	if err := store.LoadFromFile(flagFileBD); err != nil {
-		log.Fatalf("Ошибка загрузки данных: %v", err)
+	store, err := createStorage()
+	if err != nil {
+		log.Fatalf("Failed to create storage: %v", err)
 	}
+	defer store.Close()
 
-	// Обработчик завершения работы — сохраняем данные перед выходом
+	// Настройка graceful shutdown
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		<-c
-		log.Println("Получен сигнал завершения, сохраняем данные...")
-		if err := store.SaveToFile(flagFileBD); err != nil {
-			log.Printf("Ошибка сохранения данных: %v", err)
-		} else {
-			log.Println("Данные успешно сохранены")
-		}
-		os.Exit(0)
-	}()
 
 	r := chi.NewRouter()
 
@@ -90,7 +106,7 @@ func main() {
 	r.Post("/api/shorten", apiPostShorten(store))
 	r.Post("/", apiPost(store))
 
-	err := http.ListenAndServe(flagRunAddr, r)
+	err = http.ListenAndServe(flagRunAddr, r)
 	if err != nil {
 		panic(err)
 	}

@@ -5,12 +5,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
 	"github.com/go-chi/chi/v5"
+)
+
+import (
+	"syscall"
 )
 
 type responseWriterWrapper struct {

@@ -20,17 +20,21 @@ func NewInMemoryStorage() *MemoryStorage {
 	}
 }
 
-func (s *MemoryStorage) Save(ctx context.Context, shortURL, originalURL string) error {
+func (s *MemoryStorage) Save(ctx context.Context, shortURL, originalURL string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if existingShort, exists := s.short[originalURL]; exists {
+		return existingShort, ErrExists
+	}
+
 	if _, exists := s.urls[shortURL]; exists {
-		return ErrExists
+		return "", ErrExists
 	}
 
 	s.urls[shortURL] = originalURL
 	s.short[originalURL] = shortURL
-	return nil
+	return shortURL, nil
 }
 
 func (s *MemoryStorage) Get(ctx context.Context, shortURL string) (string, error) {

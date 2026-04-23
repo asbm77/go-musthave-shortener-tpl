@@ -29,18 +29,26 @@ func NewFileStorage(filePath string) *FileStorage {
 	}
 }
 
-func (s *FileStorage) Save(ctx context.Context, shortURL, originalURL string) error {
+func (s *FileStorage) Save(ctx context.Context, shortURL, originalURL string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if existingShort, exists := s.short[originalURL]; exists {
+		return existingShort, ErrExists
+	}
+
 	if _, exists := s.urls[shortURL]; exists {
-		return ErrExists
+		return "", ErrExists
 	}
 
 	s.urls[shortURL] = originalURL
 	s.short[originalURL] = shortURL
 
-	return s.saveToFile()
+	if err := s.saveToFile(); err != nil {
+		return "", err
+	}
+
+	return shortURL, nil
 }
 
 func (s *FileStorage) Get(ctx context.Context, shortURL string) (string, error) {

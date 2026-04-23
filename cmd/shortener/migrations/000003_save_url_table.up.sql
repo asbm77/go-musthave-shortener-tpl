@@ -1,0 +1,2 @@
+ALTER TABLE SAVE_URL_TABLE ADD CONSTRAINT constraint_url UNIQUE (url);
+

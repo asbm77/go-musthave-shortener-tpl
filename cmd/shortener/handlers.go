@@ -54,19 +54,29 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 
 		url := string(body)
 		shortUrla := uuid.NewString()[:8]
-		shortUrlares := flagShortAddr + "/" + shortUrla
+		//shortUrlares := flagShortAddr + "/" + shortUrla
 
 		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
 		defer cancel()
 
-		if err := store.Set(ctx, shortUrla, url); err != nil {
+		resultShortKey, err := store.Save(ctx, shortUrla, url)
+		if err != nil {
+			if err == storage.ErrExists {
+				// URL уже существует - возвращаем 409 Conflict
+				existingShortURL := flagShortAddr + "/" + resultShortKey
+				res.Header().Set("Content-Type", "text/plain")
+				res.WriteHeader(http.StatusConflict)
+				fmt.Fprintf(res, "%s", existingShortURL)
+				return
+			}
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
-
 		}
 
+		// Успешно создан новый URL
+		shortURL := flagShortAddr + "/" + resultShortKey
 		res.WriteHeader(http.StatusCreated)
-		fmt.Fprintf(res, "%s", shortUrlares)
+		fmt.Fprintf(res, "%s", shortURL)
 
 	}
 }
@@ -145,20 +155,34 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 		defer cancel()
 
 		// 6. Сохраняем в хранилище
-		if err := store.Set(ctx, shortKey, sreq.URL); err != nil {
-			log.Printf("Storage error in apiPostShorten: %v", err)
+		resultShortKey, err := store.Save(ctx, shortKey, sreq.URL)
+		if err != nil {
+			if err == storage.ErrExists {
+				// URL уже существует - возвращаем 409 Conflict
+				existingShortURL := flagShortAddr + "/" + resultShortKey
+				response := ShortenResponse{Result: existingShortURL}
+				res.Header().Set("Content-Type", "application/json")
+				res.WriteHeader(http.StatusConflict)
+				json.NewEncoder(res).Encode(response)
+				return
+			}
+			if logger.Logger != nil {
+				logger.Logger.Errorw("Storage error in apiPostShorten", "error", err)
+			}
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("URL saved successfully for key %q", shortKey)
 
-		// 7. Формируем и отправляем JSON-ответ
+		// Успешно создан новый URL
+		shortURL = flagShortAddr + "/" + resultShortKey
 		response := ShortenResponse{Result: shortURL}
 		res.Header().Set("Content-Type", "application/json")
 		res.WriteHeader(http.StatusCreated)
 
 		if err := json.NewEncoder(res).Encode(response); err != nil {
-			log.Printf("Error encoding response: %v", err)
+			if logger.Logger != nil {
+				logger.Logger.Errorw("Error encoding response", "error", err)
+			}
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
@@ -188,14 +212,12 @@ func redirectHandler(store storage.Storage) http.HandlerFunc {
 			return
 		}
 
-		// Проверка на пустой URL
 		if originalURL == "" {
 			log.Printf("Empty URL found for key: %s", id)
 			http.NotFound(res, req)
 			return
 		}
 
-		// Дополнительная проверка корректности URL
 		if !isValidURL(originalURL) {
 			log.Printf("Invalid URL format in storage for key %s: %s", id, originalURL)
 			http.Error(res, "Invalid redirect URL", http.StatusInternalServerError)

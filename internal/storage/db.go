@@ -25,28 +25,35 @@ func NewPostgresStorage(dsn string) (*PostgresStorage, error) {
 	return &PostgresStorage{db: db}, nil
 }
 
-func (s *PostgresStorage) Save(ctx context.Context, shortURL, originalURL string) error {
+func (s *PostgresStorage) Save(ctx context.Context, shortURL, originalURL string) (string, error) {
 	query := `
-		INSERT INTO urls (shorturl, url)
+		INSERT INTO save_url_table (shorturl, url)
 		VALUES ($1, $2)
-		ON CONFLICT (short_url) DO NOTHING
+		ON CONFLICT (url) DO NOTHING
 		RETURNING id
 	`
 
-	var id int64
-	err := s.db.QueryRowContext(ctx, query, shortURL, originalURL).Scan(&id)
+	var existingShortURL string
+	err := s.db.QueryRowContext(ctx, query, shortURL, originalURL).Scan(&existingShortURL)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return ErrExists
+			// Конфликт - URL уже существует, получаем существующий shorturl
+			getQuery := `SELECT shorturl FROM save_url_table WHERE url = $1`
+			err = s.db.QueryRowContext(ctx, getQuery, originalURL).Scan(&existingShortURL)
+			if err != nil {
+				return "", fmt.Errorf("failed to get existing URL: %w", err)
+			}
+			return existingShortURL, ErrExists
 		}
-		return fmt.Errorf("failed to save URL: %w", err)
+		return "", fmt.Errorf("failed to save URL: %w", err)
 	}
 
-	return nil
+	// Успешно создан новый URL
+	return existingShortURL, nil
 }
 
 func (s *PostgresStorage) Get(ctx context.Context, shortURL string) (string, error) {
-	query := `SELECT url FROM urls WHERE shorturl = $1`
+	query := `SELECT url FROM save_url_table WHERE shorturl = $1`
 
 	var originalURL string
 	err := s.db.QueryRowContext(ctx, query, shortURL).Scan(&originalURL)
@@ -62,7 +69,7 @@ func (s *PostgresStorage) Get(ctx context.Context, shortURL string) (string, err
 
 func (s *PostgresStorage) Set(ctx context.Context, key string, value string) error {
 	query := `
-		INSERT INTO urls (shorturl, url)
+		INSERT INTO save_url_table (shorturl, url)
 		VALUES ($1, $2)
 		
 	`
@@ -76,7 +83,7 @@ func (s *PostgresStorage) Set(ctx context.Context, key string, value string) err
 }
 
 func (s *PostgresStorage) Delete(ctx context.Context, key string) error {
-	query := `DELETE FROM urls WHERE shorturl = $1`
+	query := `DELETE FROM save_url_table WHERE shorturl = $1`
 
 	result, err := s.db.ExecContext(ctx, query, key)
 	if err != nil {
@@ -106,7 +113,7 @@ func (s *PostgresStorage) Close() error {
 func (s *PostgresStorage) RunMigrations() error {
 	// Создание таблицы urls
 	createTableSQL := `
-		CREATE TABLE IF NOT EXISTS urls (
+		CREATE TABLE IF NOT EXISTS save_url_table (
 			id SERIAL PRIMARY KEY,
 			shorturl VARCHAR(255) UNIQUE NOT NULL,
 			url TEXT NOT NULL,
@@ -133,7 +140,7 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, items []BatchItem) erro
 	defer tx.Rollback()
 
 	query := `
-		INSERT INTO urls (short_url, original_url, correlation_id, created_at)
+		INSERT INTO save_url_table (short_url, original_url, correlation_id, created_at)
 		VALUES ($1, $2, $3, NOW())
 		ON CONFLICT (short_url) DO UPDATE SET 
 			original_url = EXCLUDED.original_url,

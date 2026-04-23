@@ -8,17 +8,24 @@ import (
 )
 
 type FileStorage struct {
-	mu       sync.RWMutex
-	urls     map[string]string
-	short    map[string]string
-	filePath string
+	mu           sync.RWMutex
+	urls         map[string]string
+	short        map[string]string
+	correlations map[string][]string
+	filePath     string
+}
+
+type fileData struct {
+	URLs         map[string]string   `json:"urls"`
+	Correlations map[string][]string `json:"correlations"`
 }
 
 func NewFileStorage(filePath string) *FileStorage {
 	return &FileStorage{
-		urls:     make(map[string]string),
-		short:    make(map[string]string),
-		filePath: filePath,
+		urls:         make(map[string]string),
+		short:        make(map[string]string),
+		correlations: make(map[string][]string),
+		filePath:     filePath,
 	}
 }
 
@@ -103,4 +110,20 @@ func (s *FileStorage) LoadFromFile() error {
 
 	decoder := json.NewDecoder(file)
 	return decoder.Decode(&s.urls)
+}
+
+func (s *FileStorage) SaveBatch(ctx context.Context, items []BatchItem) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, item := range items {
+		s.urls[item.ShortURL] = item.OriginalURL
+		s.short[item.OriginalURL] = item.ShortURL
+
+		if item.CorrelationID != "" {
+			s.correlations[item.CorrelationID] = append(s.correlations[item.CorrelationID], item.ShortURL)
+		}
+	}
+
+	return s.saveToFile()
 }

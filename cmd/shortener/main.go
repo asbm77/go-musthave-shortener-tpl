@@ -109,6 +109,7 @@ func main() {
 
 	r.Post("/api/shorten", apiPostShorten(store))
 	r.Post("/", apiPost(store))
+	r.Post("/api/shorten/batch", apiPostShortenBatch(store))
 
 	err = http.ListenAndServe(flagRunAddr, r)
 	if err != nil {

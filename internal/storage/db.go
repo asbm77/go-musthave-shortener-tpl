@@ -123,3 +123,36 @@ func (s *PostgresStorage) RunMigrations() error {
 
 	return nil
 }
+
+func (s *PostgresStorage) SaveBatch(ctx context.Context, items []BatchItem) error {
+	// Начинаем транзакцию
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	query := `
+		INSERT INTO urls (short_url, original_url, correlation_id, created_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (short_url) DO UPDATE SET 
+			original_url = EXCLUDED.original_url,
+			correlation_id = EXCLUDED.correlation_id,
+			updated_at = NOW()
+	`
+
+	stmt, err := tx.PrepareContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, item := range items {
+		_, err = stmt.ExecContext(ctx, item.ShortURL, item.OriginalURL, item.CorrelationID)
+		if err != nil {
+			return fmt.Errorf("failed to insert batch item: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}

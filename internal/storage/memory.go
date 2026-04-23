@@ -6,15 +6,17 @@ import (
 )
 
 type MemoryStorage struct {
-	mu    sync.RWMutex
-	urls  map[string]string
-	short map[string]string
+	mu           sync.RWMutex
+	urls         map[string]string
+	short        map[string]string
+	correlations map[string][]string
 }
 
 func NewInMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
-		urls:  make(map[string]string),
-		short: make(map[string]string),
+		urls:         make(map[string]string),
+		short:        make(map[string]string),
+		correlations: make(map[string][]string),
 	}
 }
 
@@ -70,5 +72,23 @@ func (s *MemoryStorage) Ping(ctx context.Context) error {
 }
 
 func (s *MemoryStorage) Close() error {
+	return nil
+}
+
+func (s *MemoryStorage) SaveBatch(ctx context.Context, items []BatchItem) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, item := range items {
+		// Сохраняем URL
+		s.urls[item.ShortURL] = item.OriginalURL
+		s.short[item.OriginalURL] = item.ShortURL
+
+		// Сохраняем correlation_id
+		if item.CorrelationID != "" {
+			s.correlations[item.CorrelationID] = append(s.correlations[item.CorrelationID], item.ShortURL)
+		}
+	}
+
 	return nil
 }

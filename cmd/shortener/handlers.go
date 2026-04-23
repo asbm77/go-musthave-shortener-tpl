@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
 	"github.com/google/uuid"
 )
@@ -22,6 +23,17 @@ type ShortenRequest struct {
 
 type ShortenResponse struct {
 	Result string `json:"result"`
+}
+
+type BatchShortenRequest struct {
+	CorrelationID string `json:"correlation_id"`
+	OriginalURL   string `json:"original_url"`
+}
+
+// BatchShortenResponse представляет ответ на пакетное сокращение URL
+type BatchShortenResponse struct {
+	CorrelationID string `json:"correlation_id"`
+	ShortURL      string `json:"short_url"`
 }
 
 func apiPost(store storage.Storage) http.HandlerFunc {
@@ -197,4 +209,91 @@ func redirectHandler(store storage.Storage) http.HandlerFunc {
 func isValidURL(urlString string) bool {
 	parsed, err := url.Parse(urlString)
 	return err == nil && parsed.Scheme != "" && parsed.Host != ""
+}
+
+func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
+	return func(res http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			http.Error(res, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var requests []BatchShortenRequest
+		err := json.NewDecoder(req.Body).Decode(&requests)
+		if err != nil {
+			logger.Logger.Errorw("Failed to decode batch request", "error", err)
+			http.Error(res, "Bad Request: Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		if len(requests) == 0 {
+			http.Error(res, "Bad Request: Empty batch", http.StatusBadRequest)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(req.Context(), 30)
+		defer cancel()
+
+		// Подготавливаем элементы для пакетного сохранения
+		batchItems := make([]storage.BatchItem, 0, len(requests))
+		responses := make([]BatchShortenResponse, 0, len(requests))
+
+		for _, reqItem := range requests {
+			// Валидация URL
+			if reqItem.OriginalURL == "" {
+				logger.Logger.Warnw("Empty URL in batch", "correlation_id", reqItem.CorrelationID)
+				continue
+			}
+
+			if !isValidURL(reqItem.OriginalURL) {
+				logger.Logger.Warnw("Invalid URL in batch",
+					"correlation_id", reqItem.CorrelationID,
+					"url", reqItem.OriginalURL)
+				continue
+			}
+
+			// Генерируем короткий ключ
+			shortKey := uuid.NewString()[:8]
+			shortURL := flagShortAddr + "/" + shortKey
+
+			// Добавляем в список для пакетного сохранения
+			batchItems = append(batchItems, storage.BatchItem{
+				CorrelationID: reqItem.CorrelationID,
+				ShortURL:      shortKey,
+				OriginalURL:   reqItem.OriginalURL,
+			})
+
+			responses = append(responses, BatchShortenResponse{
+				CorrelationID: reqItem.CorrelationID,
+				ShortURL:      shortURL,
+			})
+		}
+
+		// Проверяем, что есть хотя бы один элемент для сохранения
+		if len(batchItems) == 0 {
+			http.Error(res, "Bad Request: No valid URLs to process", http.StatusBadRequest)
+			return
+		}
+
+		// Сохраняем все элементы одной транзакцией/операцией
+		if err := store.SaveBatch(ctx, batchItems); err != nil {
+			logger.Logger.Errorw("Failed to save batch", "error", err)
+			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		// Отправляем ответ
+		res.Header().Set("Content-Type", "application/json")
+		res.WriteHeader(http.StatusCreated)
+
+		if err := json.NewEncoder(res).Encode(responses); err != nil {
+			logger.Logger.Errorw("Failed to encode batch response", "error", err)
+			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		logger.Logger.Infow("Batch processed successfully",
+			"total_requests", len(requests),
+			"successful", len(batchItems))
+	}
 }

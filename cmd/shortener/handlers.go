@@ -147,7 +147,7 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 		}
 
 		shortKey := uuid.NewString()[:8]
-		shortURL := flagShortAddr + "/" + shortKey
+		//shortURL := flagShortAddr + "/" + shortKey
 
 		log.Printf("Saving URL for key %q: %q", shortKey, req.URL)
 
@@ -174,7 +174,7 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 		}
 
 		// Успешно создан новый URL
-		shortURL = flagShortAddr + "/" + resultShortKey
+		shortURL := flagShortAddr + "/" + resultShortKey
 		response := ShortenResponse{Result: shortURL}
 		res.Header().Set("Content-Type", "application/json")
 		res.WriteHeader(http.StatusCreated)

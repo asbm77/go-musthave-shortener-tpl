@@ -30,7 +30,7 @@ func (s *PostgresStorage) Save(ctx context.Context, shortURL, originalURL string
 		INSERT INTO save_url_table (shorturl, url)
 		VALUES ($1, $2)
 		ON CONFLICT (url) DO NOTHING
-		RETURNING id
+		RETURNING shorturl
 	`
 
 	var existingShortURL string

@@ -111,12 +111,12 @@ func (s *PostgresStorage) Close() error {
 }
 
 func (s *PostgresStorage) RunMigrations() error {
-	// Создание таблицы urls
+
 	createTableSQL := `
 		CREATE TABLE IF NOT EXISTS save_url_table (
 			id SERIAL PRIMARY KEY,
 			shorturl VARCHAR(255) UNIQUE NOT NULL,
-			url TEXT NOT NULL,
+			url TEXT NOT NULL UNIQUE
 					);
 		
 		CREATE INDEX IF NOT EXISTS idx_shorturl ON save_url_table(shorturl);

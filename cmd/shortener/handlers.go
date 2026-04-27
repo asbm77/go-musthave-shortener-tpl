@@ -253,7 +253,7 @@ func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(req.Context(), 30)
+		ctx, cancel := context.WithTimeout(req.Context(), 30*time.Second)
 		defer cancel()
 
 		// Подготавливаем элементы для пакетного сохранения

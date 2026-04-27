@@ -116,7 +116,8 @@ func (s *PostgresStorage) RunMigrations() error {
 		CREATE TABLE IF NOT EXISTS save_url_table (
 			id SERIAL PRIMARY KEY,
 			shorturl VARCHAR(255) UNIQUE NOT NULL,
-			url TEXT NOT NULL UNIQUE
+			url TEXT NOT NULL UNIQUE,
+		    correlation_id VARCHAR(255)
 					);
 		
 		CREATE INDEX IF NOT EXISTS idx_shorturl ON save_url_table(shorturl);
@@ -139,14 +140,27 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, items []BatchItem) erro
 	}
 	defer tx.Rollback()
 
+	// Проверяем, существует ли таблица
+	var exists bool
+	checkTableQuery := `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'save_url_table')`
+	err = tx.QueryRowContext(ctx, checkTableQuery).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("failed to check table existence: %w", err)
+	}
+
+	if !exists {
+		return fmt.Errorf("table save_url_table does not exist")
+	}
+
+	// Используем INSERT с ON CONFLICT для каждого элемента
 	query := `
-		INSERT INTO save_url_table (short_url, original_url, correlation_id, created_at)
-		VALUES ($1, $2, $3, NOW())
-		ON CONFLICT (short_url) DO UPDATE SET 
-			original_url = EXCLUDED.original_url,
-			correlation_id = EXCLUDED.correlation_id,
-			updated_at = NOW()
-	`
+        INSERT INTO save_url_table (shorturl, url, correlation_id)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (shorturl) DO UPDATE 
+        SET url = EXCLUDED.url, 
+            correlation_id = EXCLUDED.correlation_id
+        RETURNING shorturl
+    `
 
 	stmt, err := tx.PrepareContext(ctx, query)
 	if err != nil {
@@ -155,8 +169,9 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, items []BatchItem) erro
 	defer stmt.Close()
 
 	for _, item := range items {
-		_, err = stmt.ExecContext(ctx, item.ShortURL, item.OriginalURL, item.CorrelationID)
-		if err != nil {
+		var existingShortURL string
+		err := stmt.QueryRowContext(ctx, item.ShortURL, item.OriginalURL, item.CorrelationID).Scan(&existingShortURL)
+		if err != nil && err != sql.ErrNoRows {
 			return fmt.Errorf("failed to insert batch item: %w", err)
 		}
 	}

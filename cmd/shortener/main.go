@@ -2,6 +2,7 @@ package main
 
 //11_
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -104,6 +105,12 @@ func main() {
 	// Настройка graceful shutdown
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-c
+		fmt.Println("Завершение программы...")
+		os.Exit(0)
+	}()
 
 	r := chi.NewRouter()
 

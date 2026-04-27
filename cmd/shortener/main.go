@@ -67,6 +67,13 @@ func createStorage() (storage.Storage, error) {
 			return nil, err
 		}
 
+		err = pgStorage.RunMigrations()
+		if err != nil {
+			log.Fatalf("Ошибка выполнения миграций: %v", err)
+		}
+
+		log.Println("Миграции выполнены успешно")
+
 		return pgStorage, nil
 	}
 

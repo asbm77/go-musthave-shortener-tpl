@@ -119,7 +119,7 @@ func (s *PostgresStorage) RunMigrations() error {
 			url TEXT NOT NULL,
 					);
 		
-		CREATE INDEX IF NOT EXISTS idx_shorturl ON urls(shorturl);
+		CREATE INDEX IF NOT EXISTS idx_shorturl ON save_url_table(shorturl);
 		
 	`
 

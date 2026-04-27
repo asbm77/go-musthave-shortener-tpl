@@ -127,7 +127,7 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 
 		// 2. Декодируем JSON из тела запроса
 		var sreq ShortenRequest
-		err := json.NewDecoder(req.Body).Decode(&req)
+		err := json.NewDecoder(req.Body).Decode(&sreq)
 		if err != nil {
 			log.Printf("JSON decode error: %v", err)
 			http.Error(res, "Bad Request: Invalid JSON", http.StatusBadRequest)
@@ -149,7 +149,7 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 		shortKey := uuid.NewString()[:8]
 		//shortURL := flagShortAddr + "/" + shortKey
 
-		log.Printf("Saving URL for key %q: %q", shortKey, req.URL)
+		log.Printf("Saving URL for key %q: %q", shortKey, sreq.URL)
 
 		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
 		defer cancel()

@@ -35,7 +35,7 @@ type URLRecord struct {
 	ID            int64
 	ShortURL      string
 	OriginalURL   string
-	UserId        string
+	UserID        string
 	CorrelationID string
 	CreatedAt     string
 }

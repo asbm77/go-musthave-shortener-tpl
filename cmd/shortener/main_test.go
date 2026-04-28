@@ -423,6 +423,7 @@ func TestConcurrentRequests(t *testing.T) {
 }
 
 // Тест для API получения URL пользователя
+// Тест для API получения URL пользователя
 func TestAPIGetUserURLs(t *testing.T) {
 	store := storage.NewInMemoryStorage()
 
@@ -431,21 +432,35 @@ func TestAPIGetUserURLs(t *testing.T) {
 
 	// Сохраняем тестовые URL
 	ctx := context.Background()
-	store.SaveUserURL(ctx, userID, "abc123", "https://test1.com")
-	store.SaveUserURL(ctx, userID, "def456", "https://test2.com")
+	_, err := store.SaveUserURL(ctx, userID, "abc123", "https://test1.com")
+	if err != nil {
+		t.Fatalf("Failed to save test URL: %v", err)
+	}
+	_, err = store.SaveUserURL(ctx, userID, "def456", "https://test2.com")
+	if err != nil {
+		t.Fatalf("Failed to save test URL: %v", err)
+	}
 
+	// Создаем хендлер с middleware аутентификации
 	handler := apiGetUserURLs(store)
+
+	// Создаем middleware для установки userID в контекст
+	authHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Устанавливаем userID в контекст
+		ctx := context.WithValue(r.Context(), middleware.UserIDKey, userID)
+		handler.ServeHTTP(w, r.WithContext(ctx))
+	})
 
 	t.Run("Get existing user URLs", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
-		ctx := context.WithValue(req.Context(), "userID", userID)
-		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 
-		handler.ServeHTTP(rec, req)
+		authHandler.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusOK {
 			t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
+			t.Logf("Response body: %s", rec.Body.String())
+			return
 		}
 
 		var urls []map[string]string
@@ -460,15 +475,21 @@ func TestAPIGetUserURLs(t *testing.T) {
 
 	t.Run("User with no URLs returns 204", func(t *testing.T) {
 		newUserID := "new-user-with-no-urls"
+
+		// Создаем хендлер с новым userID
+		tempHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := context.WithValue(r.Context(), middleware.UserIDKey, newUserID)
+			handler.ServeHTTP(w, r.WithContext(ctx))
+		})
+
 		req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
-		ctx := context.WithValue(req.Context(), "userID", newUserID)
-		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 
-		handler.ServeHTTP(rec, req)
+		tempHandler.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusNoContent {
 			t.Errorf("Expected status %d, got %d", http.StatusNoContent, rec.Code)
+			t.Logf("Response body: %s", rec.Body.String())
 		}
 	})
 
@@ -476,6 +497,7 @@ func TestAPIGetUserURLs(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
 		rec := httptest.NewRecorder()
 
+		// Используем хендлер без middleware
 		handler.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusUnauthorized {

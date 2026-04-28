@@ -28,7 +28,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			userID, err = auth.ValidateToken(cookie.Value)
 			if err == nil && userID != "" {
 				// Токен валиден, сохраняем userID в контексте
-				ctx := context.WithValue(r.Context(), "userID", userID)
+				ctx := context.WithValue(r.Context(), UserIDKey, userID)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -54,14 +54,14 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		})
 
 		// Сохраняем userID в контексте
-		ctx := context.WithValue(r.Context(), "userID", userID)
+		ctx := context.WithValue(r.Context(), UserIDKey, userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 // GetUserID извлекает userID из контекста
 func GetUserID(ctx context.Context) string {
-	if userID, ok := ctx.Value("userID").(string); ok {
+	if userID, ok := ctx.Value(UserIDKey).(string); ok {
 		return userID
 	}
 	return ""

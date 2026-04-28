@@ -9,6 +9,13 @@ import (
 
 const cookieName = "user_token"
 
+type contextKey string
+
+const (
+	// UserIDKey - ключ для хранения userID в контексте
+	UserIDKey contextKey = "userID"
+)
+
 // AuthMiddleware проверяет или создает аутентификационную куку
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

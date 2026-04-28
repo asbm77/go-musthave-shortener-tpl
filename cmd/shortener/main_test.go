@@ -288,28 +288,27 @@ func TestBatchCreation(t *testing.T) {
 
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	// Получаем куку
+	// Получаем куку через POST запрос
 	var authCookie *http.Cookie
-	resp, err := client.Get(server.URL + "/ping")
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/", bytes.NewBufferString("https://init.com"))
 	if err != nil {
-		t.Fatalf("Failed to get cookie: %v", err)
+		t.Fatalf("Failed to create request: %v", err)
 	}
-	// Закрываем тело ответа
-	resp.Body.Close()
-
-	// Создаем новый запрос для получения куки через POST
-	req, _ := http.NewRequest(http.MethodPost, server.URL+"/", bytes.NewBufferString("https://init.com"))
 	req.Header.Set("Content-Type", "text/plain")
-	resp, err = client.Do(req)
+
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to get cookie: %v", err)
 	}
+
+	// Получаем куку из ответа
 	for _, cookie := range resp.Cookies() {
 		if cookie.Name == "user_token" {
 			authCookie = cookie
 			break
 		}
 	}
+	// Закрываем тело ответа
 	resp.Body.Close()
 
 	if authCookie == nil {
@@ -324,7 +323,10 @@ func TestBatchCreation(t *testing.T) {
 
 	jsonBody, _ := json.Marshal(batchRequests)
 
-	req, _ = http.NewRequest(http.MethodPost, server.URL+"/api/shorten/batch", bytes.NewBuffer(jsonBody))
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/api/shorten/batch", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		t.Fatalf("Failed to create batch request: %v", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(authCookie)
 
@@ -332,7 +334,7 @@ func TestBatchCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create batch: %v", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // Закрываем тело ответа
 
 	if resp.StatusCode != http.StatusCreated {
 		t.Errorf("Expected status %d, got %d", http.StatusCreated, resp.StatusCode)

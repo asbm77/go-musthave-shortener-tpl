@@ -215,6 +215,7 @@ func TestCreateStorage(t *testing.T) {
 }
 
 // Тест для аутентификации
+// Тест для аутентификации
 func TestAuthMiddleware(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID := middleware.GetUserID(r.Context())
@@ -238,7 +239,11 @@ func TestAuthMiddleware(t *testing.T) {
 			t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
 		}
 
-		cookies := rec.Result().Cookies()
+		// Получаем результат и закрываем тело
+		result := rec.Result()
+		defer result.Body.Close() // Закрываем тело ответа
+
+		cookies := result.Cookies()
 		found := false
 		for _, cookie := range cookies {
 			if cookie.Name == "user_token" {
@@ -275,7 +280,6 @@ func TestAuthMiddleware(t *testing.T) {
 	})
 }
 
-// Альтернативный вариант с defer
 func TestBatchCreation(t *testing.T) {
 	store := storage.NewInMemoryStorage()
 

@@ -275,7 +275,7 @@ func TestAuthMiddleware(t *testing.T) {
 	})
 }
 
-// Тест для пакетного создания URL
+// Альтернативный вариант с defer
 func TestBatchCreation(t *testing.T) {
 	store := storage.NewInMemoryStorage()
 
@@ -300,6 +300,7 @@ func TestBatchCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get cookie: %v", err)
 	}
+	defer resp.Body.Close() // Используем defer для закрытия
 
 	// Получаем куку из ответа
 	for _, cookie := range resp.Cookies() {
@@ -308,8 +309,6 @@ func TestBatchCreation(t *testing.T) {
 			break
 		}
 	}
-	// Закрываем тело ответа
-	resp.Body.Close()
 
 	if authCookie == nil {
 		t.Fatal("Failed to get auth cookie")
@@ -334,7 +333,7 @@ func TestBatchCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create batch: %v", err)
 	}
-	defer resp.Body.Close() // Закрываем тело ответа
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
 		t.Errorf("Expected status %d, got %d", http.StatusCreated, resp.StatusCode)

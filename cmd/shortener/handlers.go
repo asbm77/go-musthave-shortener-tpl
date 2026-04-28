@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
+	"github.com/asbm77/go-musthave-shortener-tpl/internal/middleware"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
 	"github.com/google/uuid"
 )
@@ -43,6 +44,12 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 			return
 		}
 
+		userID := middleware.GetUserID(req.Context())
+		if userID == "" {
+			http.Error(res, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
 		//url := req.FormValue("url")
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
@@ -59,7 +66,7 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
 		defer cancel()
 
-		resultShortKey, err := store.Save(ctx, shortUrla, url)
+		resultShortKey, err := store.SaveUserURL(ctx, userID, shortUrla, url)
 		if err != nil {
 			if err == storage.ErrExists {
 				// URL уже существует - возвращаем 409 Conflict
@@ -125,6 +132,12 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 			return
 		}
 
+		userID := middleware.GetUserID(req.Context())
+		if userID == "" {
+			http.Error(res, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
 		// 2. Декодируем JSON из тела запроса
 		var sreq ShortenRequest
 		err := json.NewDecoder(req.Body).Decode(&sreq)
@@ -155,7 +168,7 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 		defer cancel()
 
 		// 6. Сохраняем в хранилище
-		resultShortKey, err := store.Save(ctx, shortKey, sreq.URL)
+		resultShortKey, err := store.SaveUserURL(ctx, userID, shortKey, sreq.URL)
 		if err != nil {
 			if err == storage.ErrExists {
 				// URL уже существует - возвращаем 409 Conflict
@@ -183,6 +196,58 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 			if logger.Logger != nil {
 				logger.Logger.Errorw("Error encoding response", "error", err)
 			}
+			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
+func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
+	return func(res http.ResponseWriter, req *http.Request) {
+		// Проверяем метод
+		if req.Method != http.MethodGet {
+			http.Error(res, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Получаем userID из контекста
+		userID := middleware.GetUserID(req.Context())
+		if userID == "" {
+			http.Error(res, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+		defer cancel()
+
+		// Получаем URL пользователя
+		urls, err := store.GetUserURLs(ctx, userID)
+		if err != nil {
+			log.Printf("Failed to get user URLs: %v", err)
+			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		// Если URL нет, возвращаем 204
+		if len(urls) == 0 {
+			res.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// Формируем полные короткие URL
+		response := make([]map[string]string, len(urls))
+		for i, url := range urls {
+			response[i] = map[string]string{
+				"short_url":    flagShortAddr + "/" + url.ShortURL,
+				"original_url": url.OriginalURL,
+			}
+		}
+
+		res.Header().Set("Content-Type", "application/json")
+		res.WriteHeader(http.StatusOK)
+
+		if err := json.NewEncoder(res).Encode(response); err != nil {
+			log.Printf("Error encoding response: %v", err)
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
@@ -240,6 +305,12 @@ func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
 			return
 		}
 
+		userID := middleware.GetUserID(req.Context())
+		if userID == "" {
+			http.Error(res, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
 		var requests []BatchShortenRequest
 		err := json.NewDecoder(req.Body).Decode(&requests)
 		if err != nil {
@@ -263,14 +334,21 @@ func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
 		for _, reqItem := range requests {
 			// Валидация URL
 			if reqItem.OriginalURL == "" {
-				logger.Logger.Warnw("Empty URL in batch", "correlation_id", reqItem.CorrelationID)
+				if logger.Logger != nil {
+					logger.Logger.Warnw("Empty URL in batch",
+						"correlation_id", reqItem.CorrelationID,
+						"userID", userID)
+				}
 				continue
 			}
 
 			if !isValidURL(reqItem.OriginalURL) {
-				logger.Logger.Warnw("Invalid URL in batch",
-					"correlation_id", reqItem.CorrelationID,
-					"url", reqItem.OriginalURL)
+				if logger.Logger != nil {
+					logger.Logger.Warnw("Invalid URL in batch",
+						"correlation_id", reqItem.CorrelationID,
+						"url", reqItem.OriginalURL,
+						"userID", userID)
+				}
 				continue
 			}
 
@@ -283,6 +361,7 @@ func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
 				CorrelationID: reqItem.CorrelationID,
 				ShortURL:      shortKey,
 				OriginalURL:   reqItem.OriginalURL,
+				UserID:        userID,
 			})
 
 			responses = append(responses, BatchShortenResponse{
@@ -299,7 +378,12 @@ func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
 
 		// Сохраняем все элементы одной транзакцией/операцией
 		if err := store.SaveBatch(ctx, batchItems); err != nil {
-			logger.Logger.Errorw("Failed to save batch", "error", err)
+			if logger.Logger != nil {
+				logger.Logger.Errorw("Failed to save batch",
+					"error", err,
+					"userID", userID,
+					"batch_size", len(batchItems))
+			}
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
@@ -309,7 +393,11 @@ func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
 		res.WriteHeader(http.StatusCreated)
 
 		if err := json.NewEncoder(res).Encode(responses); err != nil {
-			logger.Logger.Errorw("Failed to encode batch response", "error", err)
+			if logger.Logger != nil {
+				logger.Logger.Errorw("Failed to encode batch response",
+					"error", err,
+					"userID", userID)
+			}
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}

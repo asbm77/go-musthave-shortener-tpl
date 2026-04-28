@@ -12,12 +12,14 @@ type FileStorage struct {
 	urls         map[string]string
 	short        map[string]string
 	correlations map[string][]string
+	userURLs     map[string][]UserURL
 	filePath     string
 }
 
 type fileData struct {
-	URLs         map[string]string   `json:"urls"`
-	Correlations map[string][]string `json:"correlations"`
+	URLs         map[string]string    `json:"urls"`
+	Correlations map[string][]string  `json:"correlations"`
+	UserURLs     map[string][]UserURL `json:"user_urls"`
 }
 
 func NewFileStorage(filePath string) *FileStorage {
@@ -25,6 +27,7 @@ func NewFileStorage(filePath string) *FileStorage {
 		urls:         make(map[string]string),
 		short:        make(map[string]string),
 		correlations: make(map[string][]string),
+		userURLs:     make(map[string][]UserURL),
 		filePath:     filePath,
 	}
 }
@@ -131,7 +134,45 @@ func (s *FileStorage) SaveBatch(ctx context.Context, items []BatchItem) error {
 		if item.CorrelationID != "" {
 			s.correlations[item.CorrelationID] = append(s.correlations[item.CorrelationID], item.ShortURL)
 		}
+
+		userURL := UserURL{
+			ShortURL:    item.ShortURL,
+			OriginalURL: item.OriginalURL,
+		}
+		s.userURLs[item.UserID] = append(s.userURLs[item.UserID], userURL)
 	}
 
 	return s.saveToFile()
+}
+
+func (s *FileStorage) SaveUserURL(ctx context.Context, userID, shortURL, originalURL string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Сохраняем URL
+	if _, exists := s.urls[shortURL]; !exists {
+		s.urls[shortURL] = originalURL
+	}
+
+	// Сохраняем связь с пользователем
+	userURL := UserURL{
+		ShortURL:    shortURL,
+		OriginalURL: originalURL,
+	}
+
+	s.userURLs[userID] = append(s.userURLs[userID], userURL)
+
+	return "", s.saveToFile()
+}
+
+func (s *FileStorage) GetUserURLs(ctx context.Context, userID string) ([]UserURL, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	urls, exists := s.userURLs[userID]
+	if !exists || len(urls) == 0 {
+		return []UserURL{}, nil
+	}
+
+	return urls, nil
 }

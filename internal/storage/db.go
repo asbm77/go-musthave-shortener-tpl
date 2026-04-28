@@ -117,10 +117,12 @@ func (s *PostgresStorage) RunMigrations() error {
 			id SERIAL PRIMARY KEY,
 			shorturl VARCHAR(255) UNIQUE NOT NULL,
 			url TEXT NOT NULL UNIQUE,
-		    correlation_id VARCHAR(255)
+		    correlation_id VARCHAR(255),
+		    user_id VARCHAR(255)
 					);
 		
 		CREATE INDEX IF NOT EXISTS idx_shorturl ON save_url_table(shorturl);
+		CREATE INDEX IF NOT EXISTS idx_user_id ON save_url_table(user_id);
 		
 	`
 
@@ -154,11 +156,12 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, items []BatchItem) erro
 
 	// Используем INSERT с ON CONFLICT для каждого элемента
 	query := `
-        INSERT INTO save_url_table (shorturl, url, correlation_id)
-        VALUES ($1, $2, $3)
+        INSERT INTO save_url_table (shorturl, url, correlation_id, user_id)
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT (shorturl) DO UPDATE 
         SET url = EXCLUDED.url, 
             correlation_id = EXCLUDED.correlation_id
+            user_id = EXCLUDED.user_id
         RETURNING shorturl
     `
 
@@ -177,4 +180,49 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, items []BatchItem) erro
 	}
 
 	return tx.Commit()
+}
+
+func (s *PostgresStorage) SaveUserURL(ctx context.Context, userID, shortURL, originalURL string) (string, error) {
+	query := `
+		INSERT INTO urls (short_url, original_url, user_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (short_url) DO UPDATE SET user_id = $3
+	`
+
+	_, err := s.db.ExecContext(ctx, query, shortURL, originalURL, userID)
+	if err != nil {
+		return "", fmt.Errorf("failed to save user URL: %w", err)
+	}
+
+	return "", nil
+}
+
+func (s *PostgresStorage) GetUserURLs(ctx context.Context, userID string) ([]UserURL, error) {
+	query := `
+		SELECT short_url, original_url 
+		FROM urls 
+		WHERE user_id = $1
+		ORDER BY created_at DESC
+	`
+
+	rows, err := s.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user URLs: %w", err)
+	}
+	defer rows.Close()
+
+	var urls []UserURL
+	for rows.Next() {
+		var url UserURL
+		if err := rows.Scan(&url.ShortURL, &url.OriginalURL); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+		urls = append(urls, url)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %w", err)
+	}
+
+	return urls, nil
 }

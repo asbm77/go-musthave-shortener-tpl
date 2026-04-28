@@ -19,18 +19,28 @@ type Storage interface {
 	Close() error
 
 	SaveBatch(ctx context.Context, items []BatchItem) error
+
+	SaveUserURL(ctx context.Context, userID, shortURL, originalURL string) (string, error)
+	GetUserURLs(ctx context.Context, userID string) ([]UserURL, error)
 }
 
 type BatchItem struct {
 	CorrelationID string
 	ShortURL      string
 	OriginalURL   string
+	UserID        string `json:"user_id"`
 }
 
 type URLRecord struct {
 	ID            int64
 	ShortURL      string
 	OriginalURL   string
+	UserId        string
 	CorrelationID string
 	CreatedAt     string
+}
+
+type UserURL struct {
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
 }

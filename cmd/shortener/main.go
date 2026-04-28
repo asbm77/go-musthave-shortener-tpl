@@ -120,6 +120,7 @@ func main() {
 
 	r.Get("/{id}", redirectHandler(store))
 	r.Get("/ping", apiGetPing(store))
+	r.Get("/api/user/urls", apiGetUserURLs(store))
 
 	r.Post("/api/shorten", apiPostShorten(store))
 	r.Post("/", apiPost(store))

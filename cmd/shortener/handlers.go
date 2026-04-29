@@ -262,10 +262,8 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 func redirectHandler(store storage.Storage) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 
-		if req.Method != http.MethodGet {
-			http.Error(res, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+		// Отладка
+		log.Printf("Redirect handler called: method=%s, path=%s", req.Method, req.URL.Path)
 
 		id := chi.URLParam(req, "id")
 

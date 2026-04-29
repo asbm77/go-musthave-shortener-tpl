@@ -9,12 +9,12 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/middleware"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -261,7 +261,13 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 
 func redirectHandler(store storage.Storage) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
-		id := strings.TrimPrefix(req.URL.Path, "/")
+
+		if req.Method != http.MethodGet {
+			http.Error(res, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		id := chi.URLParam(req, "id")
 
 		if id == "" {
 			http.NotFound(res, req)

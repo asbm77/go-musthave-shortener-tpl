@@ -326,10 +326,7 @@ func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
 		}
 
 		userID := middleware.GetUserID(req.Context())
-
-		// Если userID пустой и аутентификация выключена, используем временный ID
 		if userID == "" {
-			// Для обратной совместимости с тестами итерации 1
 			userID = "anonymous"
 		}
 
@@ -356,21 +353,17 @@ func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
 		for _, reqItem := range requests {
 			// Валидация URL
 			if reqItem.OriginalURL == "" {
-				if logger.Logger != nil {
-					logger.Logger.Warnw("Empty URL in batch",
-						"correlation_id", reqItem.CorrelationID,
-						"userID", userID)
-				}
+				logger.Logger.Warnw("Empty URL in batch",
+					"correlation_id", reqItem.CorrelationID,
+					"userID", userID)
 				continue
 			}
 
 			if !isValidURL(reqItem.OriginalURL) {
-				if logger.Logger != nil {
-					logger.Logger.Warnw("Invalid URL in batch",
-						"correlation_id", reqItem.CorrelationID,
-						"url", reqItem.OriginalURL,
-						"userID", userID)
-				}
+				logger.Logger.Warnw("Invalid URL in batch",
+					"correlation_id", reqItem.CorrelationID,
+					"url", reqItem.OriginalURL,
+					"userID", userID)
 				continue
 			}
 
@@ -400,12 +393,10 @@ func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
 
 		// Сохраняем все элементы одной транзакцией/операцией
 		if err := store.SaveBatch(ctx, batchItems); err != nil {
-			if logger.Logger != nil {
-				logger.Logger.Errorw("Failed to save batch",
-					"error", err,
-					"userID", userID,
-					"batch_size", len(batchItems))
-			}
+			logger.Logger.Errorw("Failed to save batch",
+				"error", err,
+				"userID", userID,
+				"batch_size", len(batchItems))
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
@@ -415,11 +406,9 @@ func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
 		res.WriteHeader(http.StatusCreated)
 
 		if err := json.NewEncoder(res).Encode(responses); err != nil {
-			if logger.Logger != nil {
-				logger.Logger.Errorw("Failed to encode batch response",
-					"error", err,
-					"userID", userID)
-			}
+			logger.Logger.Errorw("Failed to encode batch response",
+				"error", err,
+				"userID", userID)
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}

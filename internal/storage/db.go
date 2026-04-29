@@ -135,35 +135,19 @@ func (s *PostgresStorage) RunMigrations() error {
 }
 
 func (s *PostgresStorage) SaveBatch(ctx context.Context, items []BatchItem) error {
-	// Начинаем транзакцию
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	// Проверяем, существует ли таблица
-	var exists bool
-	checkTableQuery := `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'save_url_table')`
-	err = tx.QueryRowContext(ctx, checkTableQuery).Scan(&exists)
-	if err != nil {
-		return fmt.Errorf("failed to check table existence: %w", err)
-	}
-
-	if !exists {
-		return fmt.Errorf("table save_url_table does not exist")
-	}
-
-	// Используем INSERT с ON CONFLICT для каждого элемента
 	query := `
-        INSERT INTO save_url_table (shorturl, url, correlation_id, user_id)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (shorturl) DO UPDATE 
-        SET url = EXCLUDED.url, 
-            correlation_id = EXCLUDED.correlation_id
-            user_id = EXCLUDED.user_id
-        RETURNING shorturl
-    `
+		INSERT INTO save_url_table (shorturl, url, correlation_id, user_id)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (url) DO UPDATE 
+		SET correlation_id = EXCLUDED.correlation_id,
+		    user_id = EXCLUDED.user_id
+	`
 
 	stmt, err := tx.PrepareContext(ctx, query)
 	if err != nil {
@@ -172,9 +156,8 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, items []BatchItem) erro
 	defer stmt.Close()
 
 	for _, item := range items {
-		var existingShortURL string
-		err := stmt.QueryRowContext(ctx, item.ShortURL, item.OriginalURL, item.CorrelationID).Scan(&existingShortURL)
-		if err != nil && err != sql.ErrNoRows {
+		_, err := stmt.ExecContext(ctx, item.ShortURL, item.OriginalURL, item.CorrelationID, item.UserID)
+		if err != nil {
 			return fmt.Errorf("failed to insert batch item: %w", err)
 		}
 	}
@@ -183,33 +166,21 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, items []BatchItem) erro
 }
 
 func (s *PostgresStorage) SaveUserURL(ctx context.Context, userID, shortURL, originalURL string) (string, error) {
-	// Проверяем, существует ли уже такой оригинальный URL
-	var existingShortURL string
-	checkQuery := `SELECT shorturl FROM save_url_table WHERE url = $1`
-	err := s.db.QueryRowContext(ctx, checkQuery, originalURL).Scan(&existingShortURL)
-	if err == nil {
-		// URL уже существует
-		return existingShortURL, ErrExists
-	}
-	if err != sql.ErrNoRows {
-		return "", fmt.Errorf("failed to check existing URL: %w", err)
-	}
-
 	query := `
 		INSERT INTO save_url_table (shorturl, url, user_id)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (shorturl) DO UPDATE 
-		SET url = EXCLUDED.url,
-		    user_id = EXCLUDED.user_id
+		ON CONFLICT (url) DO UPDATE 
+		SET user_id = EXCLUDED.user_id
 		RETURNING shorturl
 	`
 
 	var resultShortURL string
-	err = s.db.QueryRowContext(ctx, query, shortURL, originalURL, userID).Scan(&resultShortURL)
+	err := s.db.QueryRowContext(ctx, query, shortURL, originalURL, userID).Scan(&resultShortURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to save user URL: %w", err)
 	}
 
+	// Если вернулся другой shorturl (существующий), возвращаем его
 	return resultShortURL, nil
 }
 

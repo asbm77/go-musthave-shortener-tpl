@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
+	"github.com/asbm77/go-musthave-shortener-tpl/internal/middleware"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
 	"github.com/go-chi/chi/v5"
 )
@@ -117,6 +118,12 @@ func main() {
 	r.Use(UnzipMiddleware)
 	r.Use(GzipMiddlewareWithContentType)
 	r.Use(LoggingMiddleware)
+
+	enableAuth := os.Getenv("ENABLE_AUTH") == "true" || flagEnableAuth
+
+	if enableAuth {
+		r.Use(middleware.AuthMiddleware)
+	}
 
 	r.Get("/{id}", redirectHandler(store))
 	r.Get("/ping", apiGetPing(store))

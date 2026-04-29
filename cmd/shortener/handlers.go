@@ -144,8 +144,11 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 		}
 
 		userID := middleware.GetUserID(req.Context())
+		log.Printf("apiPostShorten - userID from context: %q", userID)
+
 		if userID == "" {
 			userID = "anonymous"
+			log.Printf("apiPostShorten - using anonymous userID: %s", userID)
 		}
 
 		var sreq ShortenRequest
@@ -173,7 +176,6 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 		resultShortKey, err := store.SaveUserURL(ctx, userID, shortKey, sreq.URL)
 		if err != nil {
 			if err == storage.ErrExists {
-				// URL уже существует - возвращаем 409 Conflict
 				existingShortURL := flagShortAddr + "/" + resultShortKey
 				response := ShortenResponse{Result: existingShortURL}
 				res.Header().Set("Content-Type", "application/json")
@@ -181,16 +183,18 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 				json.NewEncoder(res).Encode(response)
 				return
 			}
+			log.Printf("SaveUserURL error: %v", err)
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
 
-		// Успешно создан новый URL
 		shortURL := flagShortAddr + "/" + resultShortKey
 		response := ShortenResponse{Result: shortURL}
 		res.Header().Set("Content-Type", "application/json")
 		res.WriteHeader(http.StatusCreated)
 		json.NewEncoder(res).Encode(response)
+
+		log.Printf("Saved URL for user %s: %s -> %s", userID, sreq.URL, shortURL)
 	}
 }
 
@@ -204,9 +208,11 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 
 		userID := middleware.GetUserID(req.Context())
 
+		// Для отладки
+		log.Printf("GetUserURLs called with userID: %q", userID)
+
 		// Если аутентификация выключена, возвращаем пустой список
 		if !flagEnableAuth {
-			// Для тестов возвращаем пустой список без ошибки
 			res.Header().Set("Content-Type", "application/json")
 			res.WriteHeader(http.StatusOK)
 			json.NewEncoder(res).Encode([]map[string]string{})
@@ -229,21 +235,19 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 			return
 		}
 
-		// Если URL нет, возвращаем 204
-		if len(urls) == 0 {
-			res.WriteHeader(http.StatusNoContent)
-			return
-		}
+		// Для отладки
+		log.Printf("Found %d URLs for user %s", len(urls), userID)
 
 		// Формируем полные короткие URL
-		response := make([]map[string]string, len(urls))
-		for i, url := range urls {
-			response[i] = map[string]string{
+		response := make([]map[string]string, 0, len(urls))
+		for _, url := range urls {
+			response = append(response, map[string]string{
 				"short_url":    flagShortAddr + "/" + url.ShortURL,
 				"original_url": url.OriginalURL,
-			}
+			})
 		}
 
+		// Всегда возвращаем 200 OK с массивом (даже пустым)
 		res.Header().Set("Content-Type", "application/json")
 		res.WriteHeader(http.StatusOK)
 

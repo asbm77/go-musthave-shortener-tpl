@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 
 	_ "github.com/lib/pq"
 )
@@ -166,19 +167,33 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, items []BatchItem) erro
 }
 
 func (s *PostgresStorage) SaveUserURL(ctx context.Context, userID, shortURL, originalURL string) (string, error) {
+	log.Printf("SaveUserURL called: userID=%s, shortURL=%s, originalURL=%s", userID, shortURL, originalURL)
+
 	// Сначала проверяем, существует ли уже такой URL
 	var existingShortURL string
-	checkQuery := `SELECT shorturl FROM save_url_table WHERE url = $1`
-	err := s.db.QueryRowContext(ctx, checkQuery, originalURL).Scan(&existingShortURL)
+	checkQuery := `SELECT shorturl, user_id FROM save_url_table WHERE url = $1`
+	var existingUserID sql.NullString
+	err := s.db.QueryRowContext(ctx, checkQuery, originalURL).Scan(&existingShortURL, &existingUserID)
 	if err == nil {
-		// URL уже существует, возвращаем существующий shorturl и ошибку ErrExists
+		log.Printf("URL already exists with shorturl=%s, existing userID=%v", existingShortURL, existingUserID)
+
+		// Если URL существует, но user_id не установлен, обновляем его
+		if !existingUserID.Valid || existingUserID.String == "" {
+			updateQuery := `UPDATE save_url_table SET user_id = $1 WHERE url = $2`
+			_, updateErr := s.db.ExecContext(ctx, updateQuery, userID, originalURL)
+			if updateErr != nil {
+				log.Printf("Failed to update user_id: %v", updateErr)
+			} else {
+				log.Printf("Updated user_id to %s for existing URL", userID)
+			}
+		}
 		return existingShortURL, ErrExists
 	}
 	if err != sql.ErrNoRows {
 		return "", fmt.Errorf("failed to check existing URL: %w", err)
 	}
 
-	// URL не существует, вставляем новый
+	// URL не существует, вставляем новый с user_id
 	query := `
 		INSERT INTO save_url_table (shorturl, url, user_id)
 		VALUES ($1, $2, $3)
@@ -188,18 +203,22 @@ func (s *PostgresStorage) SaveUserURL(ctx context.Context, userID, shortURL, ori
 	var resultShortURL string
 	err = s.db.QueryRowContext(ctx, query, shortURL, originalURL, userID).Scan(&resultShortURL)
 	if err != nil {
+		log.Printf("Failed to insert new URL: %v", err)
 		return "", fmt.Errorf("failed to save user URL: %w", err)
 	}
 
+	log.Printf("Successfully saved new URL: %s -> %s for user %s", resultShortURL, originalURL, userID)
 	return resultShortURL, nil
 }
 
 func (s *PostgresStorage) GetUserURLs(ctx context.Context, userID string) ([]UserURL, error) {
+	log.Printf("GetUserURLs called for userID: %s", userID)
 
 	query := `
 		SELECT shorturl, url 
 		FROM save_url_table 
-		WHERE user_id = $1		
+		WHERE user_id = $1
+		ORDER BY created_at DESC
 	`
 
 	rows, err := s.db.QueryContext(ctx, query, userID)
@@ -215,11 +234,13 @@ func (s *PostgresStorage) GetUserURLs(ctx context.Context, userID string) ([]Use
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 		urls = append(urls, url)
+		log.Printf("Found URL for user: short=%s, original=%s", url.ShortURL, url.OriginalURL)
 	}
 
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows iteration error: %w", err)
 	}
 
+	log.Printf("Returning %d URLs for user %s", len(urls), userID)
 	return urls, nil
 }

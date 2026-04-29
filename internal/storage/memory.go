@@ -144,7 +144,6 @@ func (s *MemoryStorage) SaveUserURL(ctx context.Context, userID, shortURL, origi
 
 	// Проверяем, не занят ли короткий URL
 	if _, exists := s.urls[shortURL]; exists {
-		// Генерируем новый короткий URL в реальном приложении
 		return "", ErrExists
 	}
 

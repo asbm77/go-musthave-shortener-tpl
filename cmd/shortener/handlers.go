@@ -50,30 +50,36 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 		}
 
 		userID := middleware.GetUserID(req.Context())
-
-		// Если userID пустой и аутентификация выключена, используем временный ID
 		if userID == "" {
-			// Для обратной совместимости с тестами итерации 1
 			userID = "anonymous"
 		}
 
-		//url := req.FormValue("url")
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
 			http.Error(res, "400 Bad Request", http.StatusBadRequest)
 			return
 		}
-
 		defer req.Body.Close()
 
-		url := string(body)
-		shortUrla := uuid.NewString()[:8]
-		//shortUrlares := flagShortAddr + "/" + shortUrla
+		originalURL := string(body)
+
+		// Валидация URL
+		if originalURL == "" {
+			http.Error(res, "Empty URL", http.StatusBadRequest)
+			return
+		}
+
+		if !isValidURL(originalURL) {
+			http.Error(res, "Invalid URL format", http.StatusBadRequest)
+			return
+		}
+
+		shortKey := uuid.NewString()[:8]
 
 		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
 		defer cancel()
 
-		resultShortKey, err := store.SaveUserURL(ctx, userID, shortUrla, url)
+		resultShortKey, err := store.SaveUserURL(ctx, userID, shortKey, originalURL)
 		if err != nil {
 			if err == storage.ErrExists {
 				// URL уже существует - возвращаем 409 Conflict
@@ -91,7 +97,6 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 		shortURL := flagShortAddr + "/" + resultShortKey
 		res.WriteHeader(http.StatusCreated)
 		fmt.Fprintf(res, "%s", shortURL)
-
 	}
 }
 
@@ -133,50 +138,38 @@ func apiGetPing(store storage.Storage) http.HandlerFunc {
 
 func apiPostShorten(store storage.Storage) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
-		// 1. Проверяем метод запроса
 		if req.Method != http.MethodPost {
 			http.Error(res, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
 		userID := middleware.GetUserID(req.Context())
-
-		// Если userID пустой и аутентификация выключена, используем временный ID
 		if userID == "" {
-			// Для обратной совместимости с тестами итерации 1
 			userID = "anonymous"
 		}
 
-		// 2. Декодируем JSON из тела запроса
 		var sreq ShortenRequest
 		err := json.NewDecoder(req.Body).Decode(&sreq)
 		if err != nil {
-			log.Printf("JSON decode error: %v", err)
 			http.Error(res, "Bad Request: Invalid JSON", http.StatusBadRequest)
 			return
 		}
 
-		// 3. Проверяем наличие URL
 		if sreq.URL == "" {
 			http.Error(res, "'url' field is required", http.StatusBadRequest)
 			return
 		}
 
-		// 4. Валидация URL: должен содержать схему (http:// или https://)
 		if !isValidURL(sreq.URL) {
 			http.Error(res, "URL must include protocol (http:// or https://)", http.StatusBadRequest)
 			return
 		}
 
 		shortKey := uuid.NewString()[:8]
-		//shortURL := flagShortAddr + "/" + shortKey
-
-		log.Printf("Saving URL for key %q: %q", shortKey, sreq.URL)
 
 		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
 		defer cancel()
 
-		// 6. Сохраняем в хранилище
 		resultShortKey, err := store.SaveUserURL(ctx, userID, shortKey, sreq.URL)
 		if err != nil {
 			if err == storage.ErrExists {
@@ -188,9 +181,6 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 				json.NewEncoder(res).Encode(response)
 				return
 			}
-			if logger.Logger != nil {
-				logger.Logger.Errorw("Storage error in apiPostShorten", "error", err)
-			}
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
@@ -200,14 +190,7 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 		response := ShortenResponse{Result: shortURL}
 		res.Header().Set("Content-Type", "application/json")
 		res.WriteHeader(http.StatusCreated)
-
-		if err := json.NewEncoder(res).Encode(response); err != nil {
-			if logger.Logger != nil {
-				logger.Logger.Errorw("Error encoding response", "error", err)
-			}
-			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
+		json.NewEncoder(res).Encode(response)
 	}
 }
 

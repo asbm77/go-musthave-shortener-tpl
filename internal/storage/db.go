@@ -166,21 +166,31 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, items []BatchItem) erro
 }
 
 func (s *PostgresStorage) SaveUserURL(ctx context.Context, userID, shortURL, originalURL string) (string, error) {
+	// Сначала проверяем, существует ли уже такой URL
+	var existingShortURL string
+	checkQuery := `SELECT shorturl FROM save_url_table WHERE url = $1`
+	err := s.db.QueryRowContext(ctx, checkQuery, originalURL).Scan(&existingShortURL)
+	if err == nil {
+		// URL уже существует, возвращаем существующий shorturl и ошибку ErrExists
+		return existingShortURL, ErrExists
+	}
+	if err != sql.ErrNoRows {
+		return "", fmt.Errorf("failed to check existing URL: %w", err)
+	}
+
+	// URL не существует, вставляем новый
 	query := `
 		INSERT INTO save_url_table (shorturl, url, user_id)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (url) DO UPDATE 
-		SET user_id = EXCLUDED.user_id
 		RETURNING shorturl
 	`
 
 	var resultShortURL string
-	err := s.db.QueryRowContext(ctx, query, shortURL, originalURL, userID).Scan(&resultShortURL)
+	err = s.db.QueryRowContext(ctx, query, shortURL, originalURL, userID).Scan(&resultShortURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to save user URL: %w", err)
 	}
 
-	// Если вернулся другой shorturl (существующий), возвращаем его
 	return resultShortURL, nil
 }
 

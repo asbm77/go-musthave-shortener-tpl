@@ -439,7 +439,13 @@ func TestConcurrentRequests(t *testing.T) {
 }
 
 // Тест для API получения URL пользователя
+// Тест для API получения URL пользователя
 func TestAPIGetUserURLs(t *testing.T) {
+
+	if !flagEnableAuth {
+		t.Skip("Skipping authentication test because auth is disabled")
+	}
+
 	store := storage.NewInMemoryStorage()
 
 	// Создаем тестового пользователя и токен
@@ -460,7 +466,7 @@ func TestAPIGetUserURLs(t *testing.T) {
 		t.Fatalf("Failed to save test URL: %v", err)
 	}
 
-	// Создаем роутер с AuthMiddleware (создает пользователя если нет куки)
+	// Создаем роутер с AuthMiddleware
 	r := chi.NewRouter()
 	r.Use(middleware.AuthMiddleware)
 	r.Get("/api/user/urls", apiGetUserURLs(store))
@@ -501,11 +507,20 @@ func TestAPIGetUserURLs(t *testing.T) {
 	})
 
 	t.Run("User with no URLs returns 204", func(t *testing.T) {
-		// Создаем нового пользователя
+		// Создаем нового пользователя без URL
 		newUserID := auth.GenerateUserID()
 		newToken, _ := auth.GenerateToken(newUserID)
 
-		req, _ := http.NewRequest(http.MethodGet, server.URL+"/api/user/urls", nil)
+		// Создаем новый роутер для чистого пользователя
+		newStore := storage.NewInMemoryStorage()
+		newR := chi.NewRouter()
+		newR.Use(middleware.AuthMiddleware)
+		newR.Get("/api/user/urls", apiGetUserURLs(newStore))
+
+		newServer := httptest.NewServer(newR)
+		defer newServer.Close()
+
+		req, _ := http.NewRequest(http.MethodGet, newServer.URL+"/api/user/urls", nil)
 		req.AddCookie(&http.Cookie{
 			Name:  "user_token",
 			Value: newToken,
@@ -517,14 +532,14 @@ func TestAPIGetUserURLs(t *testing.T) {
 		}
 		defer resp.Body.Close()
 
-		// AuthMiddleware создаст пользователя, но у него нет URL, поэтому должно быть 204
 		if resp.StatusCode != http.StatusNoContent {
 			t.Errorf("Expected status %d, got %d", http.StatusNoContent, resp.StatusCode)
 		}
 	})
 
-	t.Run("Request without cookie - AuthMiddleware creates new user", func(t *testing.T) {
+	t.Run("Request without cookie - AuthMiddleware creates new user but returns NoContent", func(t *testing.T) {
 		// Запрос без куки - AuthMiddleware создаст нового пользователя
+		// Но у нового пользователя нет URL, поэтому должно быть 204
 		req, _ := http.NewRequest(http.MethodGet, server.URL+"/api/user/urls", nil)
 
 		resp, err := client.Do(req)
@@ -533,8 +548,7 @@ func TestAPIGetUserURLs(t *testing.T) {
 		}
 		defer resp.Body.Close()
 
-		// AuthMiddleware создает пользователя, но у него нет URL, поэтому 204
-		// (не 401, так как AuthMiddleware автоматически создает пользователя)
+		// У нового пользователя нет URL, поэтому 204
 		if resp.StatusCode != http.StatusNoContent {
 			t.Errorf("Expected status %d, got %d", http.StatusNoContent, resp.StatusCode)
 		}

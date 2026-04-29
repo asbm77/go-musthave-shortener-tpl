@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
+	"github.com/asbm77/go-musthave-shortener-tpl/internal/middleware"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
 	"github.com/go-chi/chi/v5"
 )
@@ -118,13 +119,37 @@ func main() {
 	r.Use(GzipMiddlewareWithContentType)
 	r.Use(LoggingMiddleware)
 
-	r.Get("/ping", apiGetPing(store))
-	r.Get("/api/user/urls", apiGetUserURLs(store))
-	r.Get("/{id}", redirectHandler(store))
+	//r.Get("/ping", apiGetPing(store))
+	//r.Get("/api/user/urls", apiGetUserURLs(store))
+	//r.Get("/{id}", redirectHandler(store))
 
-	r.Post("/api/shorten", apiPostShorten(store))
-	r.Post("/api/shorten/batch", apiPostShortenBatch(store))
-	r.Post("/", apiPost(store))
+	//r.Post("/api/shorten", apiPostShorten(store))
+	//r.Post("/api/shorten/batch", apiPostShortenBatch(store))
+	//r.Post("/", apiPost(store))
+
+	if flagEnableAuth {
+		// Защищенные маршруты (с аутентификацией)
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.AuthMiddleware)
+			r.Get("/api/user/urls", apiGetUserURLs(store))
+			// Другие защищенные маршруты
+			r.Post("/api/shorten", apiPostShorten(store))
+			r.Post("/api/shorten/batch", apiPostShortenBatch(store))
+		})
+
+		// Публичные маршруты (без аутентификации, но с созданием анонимного пользователя)
+		r.Get("/{id}", redirectHandler(store))
+		r.Get("/ping", apiGetPing(store))
+		r.Post("/", apiPost(store))
+	} else {
+		// Режим совместимости - все маршруты без аутентификации
+		r.Get("/{id}", redirectHandler(store))
+		r.Get("/ping", apiGetPing(store))
+		r.Get("/api/user/urls", apiGetUserURLs(store))
+		r.Post("/api/shorten", apiPostShorten(store))
+		r.Post("/", apiPost(store))
+		r.Post("/api/shorten/batch", apiPostShortenBatch(store))
+	}
 
 	err = http.ListenAndServe(flagRunAddr, r)
 	if err != nil {

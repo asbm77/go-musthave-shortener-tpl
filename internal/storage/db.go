@@ -183,31 +183,47 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, items []BatchItem) erro
 }
 
 func (s *PostgresStorage) SaveUserURL(ctx context.Context, userID, shortURL, originalURL string) (string, error) {
+	// Проверяем, существует ли уже такой оригинальный URL
+	var existingShortURL string
+	checkQuery := `SELECT shorturl FROM save_url_table WHERE url = $1`
+	err := s.db.QueryRowContext(ctx, checkQuery, originalURL).Scan(&existingShortURL)
+	if err == nil {
+		// URL уже существует
+		return existingShortURL, ErrExists
+	}
+	if err != sql.ErrNoRows {
+		return "", fmt.Errorf("failed to check existing URL: %w", err)
+	}
+
 	query := `
-		INSERT INTO save_url_table (short_url, original_url, user_id)
+		INSERT INTO save_url_table (shorturl, url, user_id)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (short_url) DO UPDATE SET user_id = $3
+		ON CONFLICT (shorturl) DO UPDATE 
+		SET url = EXCLUDED.url,
+		    user_id = EXCLUDED.user_id
+		RETURNING shorturl
 	`
 
-	_, err := s.db.ExecContext(ctx, query, shortURL, originalURL, userID)
+	var resultShortURL string
+	err = s.db.QueryRowContext(ctx, query, shortURL, originalURL, userID).Scan(&resultShortURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to save user URL: %w", err)
 	}
 
-	return "", nil
+	return resultShortURL, nil
 }
 
 func (s *PostgresStorage) GetUserURLs(ctx context.Context, userID string) ([]UserURL, error) {
+
 	query := `
-		SELECT short_url, original_url 
+		SELECT shorturl, url 
 		FROM save_url_table 
-		WHERE user_id = $1
-		ORDER BY created_at DESC
+		WHERE user_id = $1		
 	`
 
 	rows, err := s.db.QueryContext(ctx, query, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user save_url_table: %w", err)
+		return nil, fmt.Errorf("failed to get user URLs: %w", err)
 	}
 	defer rows.Close()
 

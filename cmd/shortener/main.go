@@ -130,6 +130,11 @@ func main() {
 
 	if flagEnableAuth {
 		// Защищенные маршруты (с аутентификацией)
+
+		r.Get("/ping", apiGetPing(store))
+		r.Post("/", apiPost(store))
+		r.Get("/{id}", redirectHandler(store))
+
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.AuthMiddleware)
 			r.Get("/api/user/urls", apiGetUserURLs(store))
@@ -138,17 +143,13 @@ func main() {
 			r.Post("/api/shorten/batch", apiPostShortenBatch(store))
 		})
 
-		// Публичные маршруты (без аутентификации, но с созданием анонимного пользователя)
-		r.Get("/{id}", redirectHandler(store))
-		r.Get("/ping", apiGetPing(store))
-		r.Post("/", apiPost(store))
 	} else {
 		// Режим совместимости - все маршруты без аутентификации
-		r.Get("/{id}", redirectHandler(store))
 		r.Get("/ping", apiGetPing(store))
+		r.Get("/{id}", redirectHandler(store))
 		r.Get("/api/user/urls", apiGetUserURLs(store))
-		r.Post("/api/shorten", apiPostShorten(store))
 		r.Post("/", apiPost(store))
+		r.Post("/api/shorten", apiPostShorten(store))
 		r.Post("/api/shorten/batch", apiPostShortenBatch(store))
 	}
 

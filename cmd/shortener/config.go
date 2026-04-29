@@ -16,7 +16,7 @@ func parseFlags() {
 	flag.StringVar(&flagShortAddr, "b", "http://localhost:8080", "address and port short url")
 	flag.StringVar(&flagFileBD, "f", "file_bd.txt", "file bd")
 	flag.StringVar(&flagConnDB, "d", "", "file bd")
-	flag.BoolVar(&flagEnableAuth, "auth", false, "enable authentication")
+	flag.BoolVar(&flagEnableAuth, "auth", true, "enable authentication")
 	flag.Parse()
 
 	if envRunAddr := os.Getenv("SERVER_ADDRESS"); envRunAddr != "" {

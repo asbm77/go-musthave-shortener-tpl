@@ -262,13 +262,10 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 func redirectHandler(store storage.Storage) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 
-		// Отладка
-		log.Printf("Redirect handler called: method=%s, path=%s", req.Method, req.URL.Path)
-
 		id := strings.TrimPrefix(req.URL.Path, "/")
 
 		// Если ID пустой или это не наш формат (например, "ping" или "api/...")
-		if id == "" || id == "ping" || strings.HasPrefix(id, "api/") {
+		if id == "" || id == "ping" || id == "api" {
 			http.NotFound(res, req)
 			return
 		}

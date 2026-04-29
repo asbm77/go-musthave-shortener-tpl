@@ -121,9 +121,6 @@ func main() {
 	r.Get("/ping", apiGetPing(store))
 	r.Get("/api/user/urls", apiGetUserURLs(store))
 	r.Get("/{id}", redirectHandler(store))
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
-	})
 
 	r.Post("/api/shorten", apiPostShorten(store))
 	r.Post("/api/shorten/batch", apiPostShortenBatch(store))

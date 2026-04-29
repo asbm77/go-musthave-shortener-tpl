@@ -9,12 +9,12 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/middleware"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -265,9 +265,10 @@ func redirectHandler(store storage.Storage) http.HandlerFunc {
 		// Отладка
 		log.Printf("Redirect handler called: method=%s, path=%s", req.Method, req.URL.Path)
 
-		id := chi.URLParam(req, "id")
+		id := strings.TrimPrefix(req.URL.Path, "/")
 
-		if id == "" {
+		// Если ID пустой или это не наш формат (например, "ping" или "api/...")
+		if id == "" || id == "ping" || strings.HasPrefix(id, "api/") {
 			http.NotFound(res, req)
 			return
 		}

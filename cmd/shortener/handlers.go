@@ -18,6 +18,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// Функция для установки флага из main
+func SetEnableAuth(enable bool) {
+	flagEnableAuth = enable
+}
+
 type ShortenRequest struct {
 	URL string `json:"url"`
 }

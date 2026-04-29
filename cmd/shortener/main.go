@@ -96,6 +96,7 @@ func createStorage() (storage.Storage, error) {
 
 func main() {
 	parseFlags()
+	SetEnableAuth(flagEnableAuth)
 
 	store, err := createStorage()
 	if err != nil {

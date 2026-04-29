@@ -118,13 +118,20 @@ func main() {
 	r.Use(GzipMiddlewareWithContentType)
 	r.Use(LoggingMiddleware)
 
-	r.Get("/{id}", redirectHandler(store))
-	r.Get("/ping", apiGetPing(store))
-	r.Get("/api/user/urls", apiGetUserURLs(store))
+	//r.Get("/{id}", redirectHandler(store))
+	//r.Get("/ping", apiGetPing(store))
+	//r.Get("/api/user/urls", apiGetUserURLs(store))
+
+	//r.Post("/api/shorten", apiPostShorten(store))
+	//r.Post("/", apiPost(store))
+	//r.Post("/api/shorten/batch", apiPostShortenBatch(store))
 
 	r.Post("/api/shorten", apiPostShorten(store))
-	r.Post("/", apiPost(store))
 	r.Post("/api/shorten/batch", apiPostShortenBatch(store))
+	r.Get("/ping", apiGetPing(store))
+	r.Get("/api/user/urls", apiGetUserURLs(store))
+	r.Get("/{id}", redirectHandler(store))
+	r.Post("/", apiPost(store))
 
 	err = http.ListenAndServe(flagRunAddr, r)
 	if err != nil {

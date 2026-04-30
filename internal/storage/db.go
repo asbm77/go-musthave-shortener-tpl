@@ -68,20 +68,20 @@ func (s *PostgresStorage) Get(ctx context.Context, shortURL string) (string, err
 	return originalURL, nil
 }
 
-func (s *PostgresStorage) Set(ctx context.Context, key string, value string) error {
-	query := `
-		INSERT INTO save_url_table (shorturl, url)
-		VALUES ($1, $2)
-		
-	`
-
-	_, err := s.db.ExecContext(ctx, query, key, value)
-	if err != nil {
-		return fmt.Errorf("failed to set URL: %w", err)
-	}
-
-	return nil
-}
+//func (s *PostgresStorage) Set(ctx context.Context, key string, value string) error {
+//	query := `
+//		INSERT INTO save_url_table (shorturl, url)
+//		VALUES ($1, $2)
+//
+//	`
+//
+//	_, err := s.db.ExecContext(ctx, query, key, value)
+//	if err != nil {
+//		return fmt.Errorf("failed to set URL: %w", err)
+//	}
+//
+//	return nil
+//}
 
 func (s *PostgresStorage) Delete(ctx context.Context, key string) error {
 	query := `DELETE FROM save_url_table WHERE shorturl = $1`

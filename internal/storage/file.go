@@ -340,7 +340,7 @@ func (s *FileStorage) DeleteUserURLs(ctx context.Context, userID string, shortUR
 	// Проверяем, что URL принадлежат пользователю и помечаем как удаленные
 	for _, shortURL := range shortURLs {
 		// Ищем URL в urls мапе
-		if originalURL, exists := s.urls[shortURL]; exists {
+		if _, exists := s.urls[shortURL]; exists {
 			// Проверяем, принадлежит ли URL этому пользователю
 			userURLs, exists := s.userURLs[userID]
 			if !exists {

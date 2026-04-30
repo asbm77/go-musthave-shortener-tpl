@@ -175,12 +175,12 @@ func (s *PostgresStorage) SaveUserURL(ctx context.Context, userID, shortURL, ori
 	// Сначала проверяем, существует ли уже такой URL
 	var existingShortURL string
 	var existingUserID sql.NullString
-	checkQuery := `SELECT shorturl, user_id FROM save_url_table WHERE url = $1`
+	checkQuery := `SELECT shorturl, user_id FROM save_url_table WHERE url = $3`
 	err := s.db.QueryRowContext(ctx, checkQuery, originalURL).Scan(&existingShortURL, &existingUserID)
 	if err == nil {
 		// Если URL существует и user_id не установлен, обновляем его
 		if !existingUserID.Valid || existingUserID.String == "" {
-			updateQuery := `UPDATE save_url_table SET user_id = $1 WHERE url = $2`
+			updateQuery := `UPDATE save_url_table SET user_id = $1 WHERE url = $3`
 			_, updateErr := s.db.ExecContext(ctx, updateQuery, userID, originalURL)
 			if updateErr != nil {
 				log.Printf("Failed to update user_id: %v", updateErr)
@@ -195,7 +195,7 @@ func (s *PostgresStorage) SaveUserURL(ctx context.Context, userID, shortURL, ori
 	// URL не существует, вставляем новый
 	query := `
 		INSERT INTO save_url_table (shorturl, url, user_id)
-		VALUES ($1, $2, $3)
+		VALUES ($2, $3, $1)
 		RETURNING shorturl
 	`
 

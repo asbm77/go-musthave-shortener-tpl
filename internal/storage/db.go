@@ -14,12 +14,6 @@ type PostgresStorage struct {
 	db *sql.DB
 }
 
-var (
-	ErrNotFound = errors.New("URL not found")
-	ErrExists   = errors.New("URL already exists")
-	ErrGone     = errors.New("URL has been deleted")
-)
-
 func NewPostgresStorage(dsn string) (*PostgresStorage, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 var (
 	ErrNotFound = errors.New("URL not found")
 	ErrExists   = errors.New("URL already exists")
+	ErrGone     = errors.New("URL has been deleted")
 )
 
 type Storage interface {

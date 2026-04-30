@@ -233,6 +233,12 @@ func (s *PostgresStorage) GetUserURLs(ctx context.Context, userID string) ([]Use
 		urls = append(urls, url)
 	}
 
+	// Проверяем ошибки после завершения итерации
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %w", err)
+	}
+
+	log.Printf("Returning %d URLs for user %s", len(urls), userID)
 	return urls, nil
 }
 

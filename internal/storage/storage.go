@@ -14,7 +14,6 @@ var (
 type Storage interface {
 	Save(ctx context.Context, shortURL, originalURL string) (string, error)
 	Get(ctx context.Context, shortURL string) (string, error)
-	Set(ctx context.Context, key string, value string) error
 	Delete(ctx context.Context, key string) error
 	Ping(ctx context.Context) error
 	Close() error

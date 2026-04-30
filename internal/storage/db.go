@@ -167,24 +167,23 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, items []BatchItem) erro
 }
 
 func (s *PostgresStorage) SaveUserURL(ctx context.Context, userID, shortURL, originalURL string) (string, error) {
-	log.Printf("SaveUserURL called: userID=%s, shortURL=%s, originalURL=%s", userID, shortURL, originalURL)
+	// Если userID пустой, используем значение по умолчанию
+	if userID == "" {
+		userID = "anonymous"
+	}
 
 	// Сначала проверяем, существует ли уже такой URL
 	var existingShortURL string
-	checkQuery := `SELECT shorturl, user_id FROM save_url_table WHERE url = $1`
 	var existingUserID sql.NullString
+	checkQuery := `SELECT shorturl, user_id FROM save_url_table WHERE url = $1`
 	err := s.db.QueryRowContext(ctx, checkQuery, originalURL).Scan(&existingShortURL, &existingUserID)
 	if err == nil {
-		log.Printf("URL already exists with shorturl=%s, existing userID=%v", existingShortURL, existingUserID)
-
-		// Если URL существует, но user_id не установлен, обновляем его
+		// Если URL существует и user_id не установлен, обновляем его
 		if !existingUserID.Valid || existingUserID.String == "" {
 			updateQuery := `UPDATE save_url_table SET user_id = $1 WHERE url = $2`
 			_, updateErr := s.db.ExecContext(ctx, updateQuery, userID, originalURL)
 			if updateErr != nil {
 				log.Printf("Failed to update user_id: %v", updateErr)
-			} else {
-				log.Printf("Updated user_id to %s for existing URL", userID)
 			}
 		}
 		return existingShortURL, ErrExists
@@ -193,7 +192,7 @@ func (s *PostgresStorage) SaveUserURL(ctx context.Context, userID, shortURL, ori
 		return "", fmt.Errorf("failed to check existing URL: %w", err)
 	}
 
-	// URL не существует, вставляем новый с user_id
+	// URL не существует, вставляем новый
 	query := `
 		INSERT INTO save_url_table (shorturl, url, user_id)
 		VALUES ($1, $2, $3)
@@ -203,11 +202,9 @@ func (s *PostgresStorage) SaveUserURL(ctx context.Context, userID, shortURL, ori
 	var resultShortURL string
 	err = s.db.QueryRowContext(ctx, query, shortURL, originalURL, userID).Scan(&resultShortURL)
 	if err != nil {
-		log.Printf("Failed to insert new URL: %v", err)
 		return "", fmt.Errorf("failed to save user URL: %w", err)
 	}
 
-	log.Printf("Successfully saved new URL: %s -> %s for user %s", resultShortURL, originalURL, userID)
 	return resultShortURL, nil
 }
 

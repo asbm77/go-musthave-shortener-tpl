@@ -63,7 +63,6 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 
 		originalURL := string(body)
 
-		// Валидация URL
 		if originalURL == "" {
 			http.Error(res, "Empty URL", http.StatusBadRequest)
 			return
@@ -82,7 +81,6 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 		resultShortKey, err := store.SaveUserURL(ctx, userID, shortKey, originalURL)
 		if err != nil {
 			if err == storage.ErrExists {
-				// URL уже существует - возвращаем 409 Conflict
 				existingShortURL := flagShortAddr + "/" + resultShortKey
 				res.Header().Set("Content-Type", "text/plain")
 				res.WriteHeader(http.StatusConflict)
@@ -93,8 +91,8 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 			return
 		}
 
-		// Успешно создан новый URL
 		shortURL := flagShortAddr + "/" + resultShortKey
+		res.Header().Set("Content-Type", "text/plain")
 		res.WriteHeader(http.StatusCreated)
 		fmt.Fprintf(res, "%s", shortURL)
 	}
@@ -144,11 +142,9 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 		}
 
 		userID := middleware.GetUserID(req.Context())
-		log.Printf("apiPostShorten - userID from context: %q", userID)
 
-		if userID == "" {
+		if userID == "" && flagEnableAuth {
 			userID = "anonymous"
-			log.Printf("apiPostShorten - using anonymous userID: %s", userID)
 		}
 
 		var sreq ShortenRequest
@@ -193,8 +189,6 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 		res.Header().Set("Content-Type", "application/json")
 		res.WriteHeader(http.StatusCreated)
 		json.NewEncoder(res).Encode(response)
-
-		log.Printf("Saved URL for user %s: %s -> %s", userID, sreq.URL, shortURL)
 	}
 }
 
@@ -208,19 +202,20 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 
 		userID := middleware.GetUserID(req.Context())
 
-		// Для отладки
-		log.Printf("GetUserURLs called with userID: %q", userID)
+		// Всегда устанавливаем Content-Type для JSON
+		res.Header().Set("Content-Type", "application/json")
 
-		// Если аутентификация выключена, возвращаем пустой список
+		// Если аутентификация выключена, возвращаем пустой массив
 		if !flagEnableAuth {
-			res.Header().Set("Content-Type", "application/json")
 			res.WriteHeader(http.StatusOK)
 			json.NewEncoder(res).Encode([]map[string]string{})
 			return
 		}
 
 		if userID == "" {
-			http.Error(res, "Unauthorized", http.StatusUnauthorized)
+			// Возвращаем пустой массив, а не ошибку
+			res.WriteHeader(http.StatusOK)
+			json.NewEncoder(res).Encode([]map[string]string{})
 			return
 		}
 
@@ -231,12 +226,10 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 		urls, err := store.GetUserURLs(ctx, userID)
 		if err != nil {
 			log.Printf("Failed to get user URLs: %v", err)
-			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
+			res.WriteHeader(http.StatusOK)
+			json.NewEncoder(res).Encode([]map[string]string{})
 			return
 		}
-
-		// Для отладки
-		log.Printf("Found %d URLs for user %s", len(urls), userID)
 
 		// Формируем полные короткие URL
 		response := make([]map[string]string, 0, len(urls))
@@ -248,13 +241,11 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 		}
 
 		// Всегда возвращаем 200 OK с массивом (даже пустым)
-		res.Header().Set("Content-Type", "application/json")
 		res.WriteHeader(http.StatusOK)
-
 		if err := json.NewEncoder(res).Encode(response); err != nil {
 			log.Printf("Error encoding response: %v", err)
-			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
-			return
+			res.WriteHeader(http.StatusOK)
+			json.NewEncoder(res).Encode([]map[string]string{})
 		}
 	}
 }

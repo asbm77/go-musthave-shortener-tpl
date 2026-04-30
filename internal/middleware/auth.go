@@ -1,3 +1,4 @@
+// middleware/auth.go
 package middleware
 
 import (
@@ -12,7 +13,6 @@ const cookieName = "user_token"
 type contextKey string
 
 const (
-	// UserIDKey - ключ для хранения userID в контексте
 	UserIDKey contextKey = "userID"
 )
 
@@ -49,7 +49,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			Path:     "/",
 			MaxAge:   30 * 24 * 3600, // 30 дней
 			HttpOnly: true,
-			Secure:   false, // Для production установить true (только HTTPS)
+			Secure:   false, // Для development, в production true
 			SameSite: http.SameSiteLaxMode,
 		})
 

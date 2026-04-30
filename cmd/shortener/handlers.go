@@ -200,23 +200,31 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 			return
 		}
 
+		// Получаем userID из контекста (устанавливается AuthMiddleware)
 		userID := middleware.GetUserID(req.Context())
 
-		// Всегда устанавливаем Content-Type для JSON
-		res.Header().Set("Content-Type", "application/json")
+		log.Printf("[DEBUG] apiGetUserURLs - userID from context: '%s'", userID)
 
-		// Если аутентификация выключена, возвращаем пустой массив
-		if !flagEnableAuth {
-			res.WriteHeader(http.StatusOK)
-			json.NewEncoder(res).Encode([]map[string]string{})
-			return
+		// Если аутентификация включена
+		if flagEnableAuth {
+			// Проверяем, есть ли кука с валидным userID
+			cookie, err := req.Cookie("user_token")
+			if err != nil || cookie.Value == "" {
+				// Кука отсутствует или пустая
+				http.Error(res, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+
+			// Если userID пустой после проверки куки
+			if userID == "" {
+				http.Error(res, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
 		}
 
+		// Для обратной совместимости, если аутентификация выключена
 		if userID == "" {
-			// Возвращаем пустой массив, а не ошибку
-			res.WriteHeader(http.StatusOK)
-			json.NewEncoder(res).Encode([]map[string]string{})
-			return
+			userID = "anonymous"
 		}
 
 		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
@@ -225,9 +233,14 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 		// Получаем URL пользователя
 		urls, err := store.GetUserURLs(ctx, userID)
 		if err != nil {
-			log.Printf("Failed to get user URLs: %v", err)
-			res.WriteHeader(http.StatusOK)
-			json.NewEncoder(res).Encode([]map[string]string{})
+			log.Printf("[DEBUG] GetUserURLs error: %v", err)
+			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		// Если URL нет, возвращаем 204 No Content
+		if len(urls) == 0 {
+			res.WriteHeader(http.StatusNoContent)
 			return
 		}
 
@@ -240,13 +253,16 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 			})
 		}
 
-		// Всегда возвращаем 200 OK с массивом (даже пустым)
+		res.Header().Set("Content-Type", "application/json")
 		res.WriteHeader(http.StatusOK)
+
 		if err := json.NewEncoder(res).Encode(response); err != nil {
-			log.Printf("Error encoding response: %v", err)
-			res.WriteHeader(http.StatusOK)
-			json.NewEncoder(res).Encode([]map[string]string{})
+			log.Printf("[DEBUG] Error encoding response: %v", err)
+			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
+			return
 		}
+
+		log.Printf("[DEBUG] apiGetUserURLs - returning %d URLs for user %s", len(response), userID)
 	}
 }
 

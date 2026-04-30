@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"os"
 	"sync"
 )
@@ -11,33 +12,36 @@ type FileStorage struct {
 	mu           sync.RWMutex
 	urls         map[string]string    // shortURL -> originalURL
 	short        map[string]string    // originalURL -> shortURL
+	deleted      map[string]bool      // shortURL -> isDeleted
 	correlations map[string][]string  // correlationID -> []shortURL
 	userURLs     map[string][]UserURL // userID -> []UserURL
 	filePath     string
-}
-
-type fileData struct {
-	URLs         map[string]string    `json:"urls"`
-	Short        map[string]string    `json:"short"`
-	Correlations map[string][]string  `json:"correlations"`
-	UserURLs     map[string][]UserURL `json:"user_urls"`
 }
 
 func NewFileStorage(filePath string) *FileStorage {
 	return &FileStorage{
 		urls:         make(map[string]string),
 		short:        make(map[string]string),
+		deleted:      make(map[string]bool),
 		correlations: make(map[string][]string),
 		userURLs:     make(map[string][]UserURL),
 		filePath:     filePath,
 	}
 }
 
-// saveToFile сохраняет все данные в файл
+type fileData struct {
+	URLs         map[string]string    `json:"urls"`
+	Short        map[string]string    `json:"short"`
+	Deleted      map[string]bool      `json:"deleted"`
+	Correlations map[string][]string  `json:"correlations"`
+	UserURLs     map[string][]UserURL `json:"user_urls"`
+}
+
 func (s *FileStorage) saveToFile() error {
 	data := fileData{
 		URLs:         s.urls,
 		Short:        s.short,
+		Deleted:      s.deleted,
 		Correlations: s.correlations,
 		UserURLs:     s.userURLs,
 	}
@@ -49,11 +53,10 @@ func (s *FileStorage) saveToFile() error {
 	defer file.Close()
 
 	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ") // Для читаемости файла
+	encoder.SetIndent("", "  ")
 	return encoder.Encode(data)
 }
 
-// LoadFromFile загружает все данные из файла
 func (s *FileStorage) LoadFromFile() error {
 	file, err := os.Open(s.filePath)
 	if err != nil {
@@ -77,11 +80,16 @@ func (s *FileStorage) LoadFromFile() error {
 	if data.Short != nil {
 		s.short = data.Short
 	} else {
-		// Если short мапа отсутствует в файле (старая версия), восстанавливаем её
+		// Обратная совместимость
 		s.short = make(map[string]string)
 		for shortURL, originalURL := range s.urls {
 			s.short[originalURL] = shortURL
 		}
+	}
+	if data.Deleted != nil {
+		s.deleted = data.Deleted
+	} else {
+		s.deleted = make(map[string]bool)
 	}
 	if data.Correlations != nil {
 		s.correlations = data.Correlations
@@ -119,10 +127,14 @@ func (s *FileStorage) Save(ctx context.Context, shortURL, originalURL string) (s
 	return shortURL, nil
 }
 
-// Get возвращает оригинальный URL по короткому URL
 func (s *FileStorage) Get(ctx context.Context, shortURL string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	// Проверяем, не удален ли URL
+	if s.deleted[shortURL] {
+		return "", ErrGone
+	}
 
 	originalURL, exists := s.urls[shortURL]
 	if !exists {
@@ -278,9 +290,14 @@ func (s *FileStorage) GetUserURLs(ctx context.Context, userID string) ([]UserURL
 		return []UserURL{}, nil
 	}
 
-	// Возвращаем копию
-	result := make([]UserURL, len(urls))
-	copy(result, urls)
+	// Фильтруем удаленные URL
+	var result []UserURL
+	for _, url := range urls {
+		if !s.deleted[url.ShortURL] {
+			result = append(result, url)
+		}
+	}
+
 	return result, nil
 }
 
@@ -309,5 +326,43 @@ func (s *FileStorage) Clear() error {
 	s.correlations = make(map[string][]string)
 	s.userURLs = make(map[string][]UserURL)
 
+	return s.saveToFile()
+}
+
+func (s *FileStorage) DeleteUserURLs(ctx context.Context, userID string, shortURLs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(shortURLs) == 0 {
+		return nil
+	}
+
+	// Проверяем, что URL принадлежат пользователю и помечаем как удаленные
+	for _, shortURL := range shortURLs {
+		// Ищем URL в urls мапе
+		if originalURL, exists := s.urls[shortURL]; exists {
+			// Проверяем, принадлежит ли URL этому пользователю
+			userURLs, exists := s.userURLs[userID]
+			if !exists {
+				continue
+			}
+
+			found := false
+			for _, userURL := range userURLs {
+				if userURL.ShortURL == shortURL {
+					found = true
+					break
+				}
+			}
+
+			if found {
+				// Помечаем как удаленный
+				s.deleted[shortURL] = true
+				log.Printf("[DEBUG] Marked URL as deleted: %s for user %s", shortURL, userID)
+			}
+		}
+	}
+
+	// Сохраняем изменения в файл
 	return s.saveToFile()
 }

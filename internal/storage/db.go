@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 
@@ -12,6 +13,12 @@ import (
 type PostgresStorage struct {
 	db *sql.DB
 }
+
+var (
+	ErrNotFound = errors.New("URL not found")
+	ErrExists   = errors.New("URL already exists")
+	ErrGone     = errors.New("URL has been deleted")
+)
 
 func NewPostgresStorage(dsn string) (*PostgresStorage, error) {
 	db, err := sql.Open("postgres", dsn)
@@ -53,15 +60,21 @@ func (s *PostgresStorage) Save(ctx context.Context, shortURL, originalURL string
 }
 
 func (s *PostgresStorage) Get(ctx context.Context, shortURL string) (string, error) {
-	query := `SELECT url FROM save_url_table WHERE shorturl = $1`
+	query := `SELECT url, is_deleted FROM save_url_table WHERE shorturl = $1`
 
 	var originalURL string
-	err := s.db.QueryRowContext(ctx, query, shortURL).Scan(&originalURL)
+	var isDeleted bool
+	err := s.db.QueryRowContext(ctx, query, shortURL).Scan(&originalURL, &isDeleted)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", ErrNotFound
 		}
 		return "", fmt.Errorf("failed to get URL: %w", err)
+	}
+
+	// Если URL помечен как удаленный, возвращаем специальную ошибку
+	if isDeleted {
+		return "", ErrGone
 	}
 
 	return originalURL, nil
@@ -103,12 +116,14 @@ func (s *PostgresStorage) RunMigrations() error {
 			url TEXT NOT NULL UNIQUE,
 			correlation_id VARCHAR(255),
 			user_id VARCHAR(255),
+			is_deleted BOOLEAN DEFAULT FALSE,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
 		
 		CREATE INDEX IF NOT EXISTS idx_shorturl ON save_url_table(shorturl);
 		CREATE INDEX IF NOT EXISTS idx_url ON save_url_table(url);
 		CREATE INDEX IF NOT EXISTS idx_user_id ON save_url_table(user_id);
+		CREATE INDEX IF NOT EXISTS idx_is_deleted ON save_url_table(is_deleted);
 	`
 
 	_, err := s.db.Exec(createTableSQL)
@@ -206,13 +221,12 @@ func (s *PostgresStorage) GetUserURLs(ctx context.Context, userID string) ([]Use
 	query := `
 		SELECT shorturl, url 
 		FROM save_url_table 
-		WHERE user_id = $1
+		WHERE user_id = $1 AND is_deleted = FALSE
 		ORDER BY created_at DESC
 	`
 
 	rows, err := s.db.QueryContext(ctx, query, userID)
 	if err != nil {
-		log.Printf("Query error: %v", err)
 		return nil, fmt.Errorf("failed to get user URLs: %w", err)
 	}
 	defer rows.Close()
@@ -221,18 +235,36 @@ func (s *PostgresStorage) GetUserURLs(ctx context.Context, userID string) ([]Use
 	for rows.Next() {
 		var url UserURL
 		if err := rows.Scan(&url.ShortURL, &url.OriginalURL); err != nil {
-			log.Printf("Scan error: %v", err)
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 		urls = append(urls, url)
-		log.Printf("Found URL for user: short=%s, original=%s", url.ShortURL, url.OriginalURL)
 	}
 
-	if err = rows.Err(); err != nil {
-		log.Printf("Rows error: %v", err)
-		return nil, fmt.Errorf("rows iteration error: %w", err)
-	}
-
-	log.Printf("Returning %d URLs for user %s", len(urls), userID)
 	return urls, nil
+}
+
+func (s *PostgresStorage) DeleteUserURLs(ctx context.Context, userID string, shortURLs []string) error {
+	if len(shortURLs) == 0 {
+		return nil
+	}
+
+	// Используем множественное обновление (batch update)
+	query := `
+		UPDATE save_url_table 
+		SET is_deleted = TRUE 
+		WHERE shorturl = ANY($1) AND user_id = $2
+	`
+
+	result, err := s.db.ExecContext(ctx, query, shortURLs, userID)
+	if err != nil {
+		return fmt.Errorf("failed to delete user URLs: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	log.Printf("[DEBUG] Deleted %d URLs for user %s", rowsAffected, userID)
+	return nil
 }

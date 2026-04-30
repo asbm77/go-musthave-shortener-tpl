@@ -287,10 +287,8 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 
 func redirectHandler(store storage.Storage) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
-
 		id := strings.TrimPrefix(req.URL.Path, "/")
 
-		// Если ID пустой или это не наш формат (например, "ping" или "api/...")
 		if id == "" || id == "ping" || id == "api" {
 			http.NotFound(res, req)
 			return
@@ -305,20 +303,18 @@ func redirectHandler(store storage.Storage) http.HandlerFunc {
 				http.NotFound(res, req)
 				return
 			}
+			if errors.Is(err, storage.ErrGone) {
+				// URL был удален
+				res.WriteHeader(http.StatusGone)
+				return
+			}
 			log.Printf("Storage error in redirect: %v", err)
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
 
 		if originalURL == "" {
-			log.Printf("Empty URL found for key: %s", id)
 			http.NotFound(res, req)
-			return
-		}
-
-		if !isValidURL(originalURL) {
-			log.Printf("Invalid URL format in storage for key %s: %s", id, originalURL)
-			http.Error(res, "Invalid redirect URL", http.StatusInternalServerError)
 			return
 		}
 
@@ -429,5 +425,66 @@ func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
 		logger.Logger.Infow("Batch processed successfully",
 			"total_requests", len(requests),
 			"successful", len(batchItems))
+	}
+}
+
+func apiDeleteUserURLs(store storage.Storage) http.HandlerFunc {
+	return func(res http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodDelete {
+			http.Error(res, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Получаем userID из контекста
+		userID := middleware.GetUserID(req.Context())
+
+		log.Printf("[DEBUG] apiDeleteUserURLs - userID from context: '%s'", userID)
+
+		if flagEnableAuth && userID == "" {
+			http.Error(res, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		if userID == "" {
+			userID = "anonymous"
+		}
+
+		// Декодируем список коротких URL из тела запроса
+		var shortURLs []string
+		err := json.NewDecoder(req.Body).Decode(&shortURLs)
+		if err != nil {
+			http.Error(res, "Bad Request: Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		if len(shortURLs) == 0 {
+			http.Error(res, "Bad Request: Empty list", http.StatusBadRequest)
+			return
+		}
+
+		// Извлекаем только ID из полных URL (если переданы полные URL)
+		for i, shortURL := range shortURLs {
+			// Очищаем URL, оставляя только ID
+			if strings.Contains(shortURL, "/") {
+				parts := strings.Split(shortURL, "/")
+				shortURLs[i] = parts[len(parts)-1]
+			}
+		}
+
+		// Асинхронно удаляем URL
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			if err := store.DeleteUserURLs(ctx, userID, shortURLs); err != nil {
+				log.Printf("[ERROR] Failed to delete URLs for user %s: %v", userID, err)
+			} else {
+				log.Printf("[INFO] Successfully deleted %d URLs for user %s", len(shortURLs), userID)
+			}
+		}()
+
+		// Возвращаем 202 Accepted
+		res.WriteHeader(http.StatusAccepted)
+		log.Printf("[DEBUG] apiDeleteUserURLs - accepted deletion request for %d URLs from user %s", len(shortURLs), userID)
 	}
 }

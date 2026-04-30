@@ -7,16 +7,18 @@ import (
 
 type MemoryStorage struct {
 	mu           sync.RWMutex
-	urls         map[string]string    // shortURL -> originalURL
-	short        map[string]string    // originalURL -> shortURL
-	correlations map[string][]string  // correlationID -> []shortURL
-	userURLs     map[string][]UserURL // userID -> []UserURL
+	urls         map[string]string // shortURL -> originalURL
+	short        map[string]string // originalURL -> shortURL
+	deleted      map[string]bool   // shortURL -> isDeleted
+	correlations map[string][]string
+	userURLs     map[string][]UserURL
 }
 
 func NewInMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
 		urls:         make(map[string]string),
 		short:        make(map[string]string),
+		deleted:      make(map[string]bool),
 		correlations: make(map[string][]string),
 		userURLs:     make(map[string][]UserURL),
 	}
@@ -46,6 +48,10 @@ func (s *MemoryStorage) Save(ctx context.Context, shortURL, originalURL string) 
 func (s *MemoryStorage) Get(ctx context.Context, shortURL string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	if s.deleted[shortURL] {
+		return "", ErrGone
+	}
 
 	originalURL, exists := s.urls[shortURL]
 	if !exists {
@@ -231,4 +237,25 @@ func (s *MemoryStorage) Clear() {
 	s.short = make(map[string]string)
 	s.correlations = make(map[string][]string)
 	s.userURLs = make(map[string][]UserURL)
+}
+
+func (s *MemoryStorage) DeleteUserURLs(ctx context.Context, userID string, shortURLs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, shortURL := range shortURLs {
+		// Проверяем, принадлежит ли URL пользователю
+		userURLs, exists := s.userURLs[userID]
+		if !exists {
+			continue
+		}
+
+		for _, userURL := range userURLs {
+			if userURL.ShortURL == shortURL {
+				s.deleted[shortURL] = true
+				break
+			}
+		}
+	}
+	return nil
 }

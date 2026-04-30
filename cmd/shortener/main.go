@@ -118,7 +118,6 @@ func main() {
 	r.Use(LoggingMiddleware)
 
 	if flagEnableAuth {
-		// Применяем AuthMiddleware ко всем маршрутам, которые работают с пользователями
 		// Публичные маршруты (без аутентификации)
 		r.Get("/ping", apiGetPing(store))
 		r.Get("/{id}", redirectHandler(store))
@@ -129,8 +128,10 @@ func main() {
 			r.Get("/api/user/urls", apiGetUserURLs(store))
 			r.Post("/api/shorten", apiPostShorten(store))
 			r.Post("/api/shorten/batch", apiPostShortenBatch(store))
-			// Также защищаем POST / - чтобы использовать тот же userID
 			r.Post("/", apiPost(store))
+
+			// Новый эндпоинт для удаления
+			r.Delete("/api/user/urls", apiDeleteUserURLs(store))
 		})
 	} else {
 		// Режим совместимости - все маршруты без аутентификации
@@ -140,6 +141,7 @@ func main() {
 		r.Post("/", apiPost(store))
 		r.Post("/api/shorten", apiPostShorten(store))
 		r.Post("/api/shorten/batch", apiPostShortenBatch(store))
+		r.Delete("/api/user/urls", apiDeleteUserURLs(store))
 	}
 
 	err = http.ListenAndServe(flagRunAddr, r)

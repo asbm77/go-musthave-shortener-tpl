@@ -13,7 +13,8 @@ var (
 type Storage interface {
 	Save(ctx context.Context, shortURL, originalURL string) (string, error)
 	Get(ctx context.Context, shortURL string) (string, error)
-	Delete(ctx context.Context, key string) error // Добавлен
+	Set(ctx context.Context, key string, value string) error
+	Delete(ctx context.Context, key string) error
 	Ping(ctx context.Context) error
 	Close() error
 
@@ -21,6 +22,8 @@ type Storage interface {
 
 	SaveUserURL(ctx context.Context, userID, shortURL, originalURL string) (string, error)
 	GetUserURLs(ctx context.Context, userID string) ([]UserURL, error)
+
+	DeleteUserURLs(ctx context.Context, userID string, shortURLs []string) error
 }
 
 type BatchItem struct {

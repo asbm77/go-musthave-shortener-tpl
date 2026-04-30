@@ -49,7 +49,20 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 			return
 		}
 
+		// Получаем userID из контекста (устанавливается AuthMiddleware)
 		userID := middleware.GetUserID(req.Context())
+
+		// Для отладки
+		log.Printf("[DEBUG] apiPost - userID from context: '%s'", userID)
+
+		// Если аутентификация включена, но userID пустой - это ошибка
+		if flagEnableAuth && userID == "" {
+			log.Printf("[DEBUG] apiPost - no userID despite auth enabled")
+			http.Error(res, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Для обратной совместимости (если аутентификация выключена)
 		if userID == "" {
 			userID = "anonymous"
 		}
@@ -87,6 +100,7 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 				fmt.Fprintf(res, "%s", existingShortURL)
 				return
 			}
+			log.Printf("[DEBUG] apiPost - SaveUserURL error: %v", err)
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
@@ -95,6 +109,8 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 		res.Header().Set("Content-Type", "text/plain")
 		res.WriteHeader(http.StatusCreated)
 		fmt.Fprintf(res, "%s", shortURL)
+
+		log.Printf("[DEBUG] apiPost - saved URL for user %s: %s -> %s", userID, originalURL, shortURL)
 	}
 }
 
@@ -141,9 +157,18 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 			return
 		}
 
+		// Получаем userID из контекста
 		userID := middleware.GetUserID(req.Context())
 
-		if userID == "" && flagEnableAuth {
+		log.Printf("[DEBUG] apiPostShorten - userID from context: '%s'", userID)
+
+		if flagEnableAuth && userID == "" {
+			log.Printf("[DEBUG] apiPostShorten - no userID despite auth enabled")
+			http.Error(res, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		if userID == "" {
 			userID = "anonymous"
 		}
 
@@ -179,7 +204,7 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 				json.NewEncoder(res).Encode(response)
 				return
 			}
-			log.Printf("SaveUserURL error: %v", err)
+			log.Printf("[DEBUG] apiPostShorten - SaveUserURL error: %v", err)
 			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
@@ -189,12 +214,13 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 		res.Header().Set("Content-Type", "application/json")
 		res.WriteHeader(http.StatusCreated)
 		json.NewEncoder(res).Encode(response)
+
+		log.Printf("[DEBUG] apiPostShorten - saved URL for user %s: %s -> %s", userID, sreq.URL, shortURL)
 	}
 }
 
 func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
-		// Проверяем метод
 		if req.Method != http.MethodGet {
 			http.Error(res, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -205,26 +231,18 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 
 		log.Printf("[DEBUG] apiGetUserURLs - userID from context: '%s'", userID)
 
-		// Если аутентификация включена
+		// Если аутентификация включена, проверяем userID
 		if flagEnableAuth {
-			// Проверяем, есть ли кука с валидным userID
-			cookie, err := req.Cookie("user_token")
-			if err != nil || cookie.Value == "" {
-				// Кука отсутствует или пустая
-				http.Error(res, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-
-			// Если userID пустой после проверки куки
 			if userID == "" {
+				log.Printf("[DEBUG] apiGetUserURLs - no userID, returning 401")
 				http.Error(res, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
-		}
-
-		// Для обратной совместимости, если аутентификация выключена
-		if userID == "" {
-			userID = "anonymous"
+		} else {
+			// Если аутентификация выключена, используем anonymous
+			if userID == "" {
+				userID = "anonymous"
+			}
 		}
 
 		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
@@ -240,6 +258,7 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 
 		// Если URL нет, возвращаем 204 No Content
 		if len(urls) == 0 {
+			log.Printf("[DEBUG] apiGetUserURLs - no URLs for user %s, returning 204", userID)
 			res.WriteHeader(http.StatusNoContent)
 			return
 		}

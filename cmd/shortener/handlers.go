@@ -43,6 +43,28 @@ type BatchShortenResponse struct {
 	ShortURL      string `json:"short_url"`
 }
 
+func getUserIDFromContext(r *http.Request) (string, error) {
+	userID := middleware.GetUserID(r.Context())
+
+	// Для отладки
+	log.Printf("[DEBUG] getUserIDFromContext - userID: '%s', auth enabled: %v", userID, flagEnableAuth)
+
+	// Если аутентификация включена, проверяем наличие userID
+	if flagEnableAuth {
+		if userID == "" {
+			return "", fmt.Errorf("unauthorized")
+		}
+		return userID, nil
+	}
+
+	// Если аутентификация выключена, используем anonymous для пустого userID
+	if userID == "" {
+		userID = "anonymous"
+	}
+
+	return userID, nil
+}
+
 func apiPost(store storage.Storage) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
@@ -50,22 +72,10 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 			return
 		}
 
-		// Получаем userID из контекста (устанавливается AuthMiddleware)
-		userID := middleware.GetUserID(req.Context())
-
-		// Для отладки
-		log.Printf("[DEBUG] apiPost - userID from context: '%s'", userID)
-
-		// Если аутентификация включена, но userID пустой - это ошибка
-		if flagEnableAuth && userID == "" {
-			log.Printf("[DEBUG] apiPost - no userID despite auth enabled")
+		userID, err := getUserIDFromContext(req)
+		if err != nil {
 			http.Error(res, "Unauthorized", http.StatusUnauthorized)
 			return
-		}
-
-		// Для обратной совместимости (если аутентификация выключена)
-		if userID == "" {
-			userID = "anonymous"
 		}
 
 		body, err := io.ReadAll(req.Body)
@@ -159,22 +169,14 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 		}
 
 		// Получаем userID из контекста
-		userID := middleware.GetUserID(req.Context())
-
-		log.Printf("[DEBUG] apiPostShorten - userID from context: '%s'", userID)
-
-		if flagEnableAuth && userID == "" {
-			log.Printf("[DEBUG] apiPostShorten - no userID despite auth enabled")
+		userID, err := getUserIDFromContext(req)
+		if err != nil {
 			http.Error(res, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		if userID == "" {
-			userID = "anonymous"
-		}
-
 		var sreq ShortenRequest
-		err := json.NewDecoder(req.Body).Decode(&sreq)
+		err = json.NewDecoder(req.Body).Decode(&sreq)
 		if err != nil {
 			http.Error(res, "Bad Request: Invalid JSON", http.StatusBadRequest)
 			return
@@ -227,23 +229,10 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 			return
 		}
 
-		// Получаем userID из контекста (устанавливается AuthMiddleware)
-		userID := middleware.GetUserID(req.Context())
-
-		log.Printf("[DEBUG] apiGetUserURLs - userID from context: '%s'", userID)
-
-		// Если аутентификация включена, проверяем userID
-		if flagEnableAuth {
-			if userID == "" {
-				log.Printf("[DEBUG] apiGetUserURLs - no userID, returning 401")
-				http.Error(res, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-		} else {
-			// Если аутентификация выключена, используем anonymous
-			if userID == "" {
-				userID = "anonymous"
-			}
+		userID, err := getUserIDFromContext(req)
+		if err != nil {
+			http.Error(res, "Unauthorized", http.StatusUnauthorized)
+			return
 		}
 
 		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
@@ -335,13 +324,14 @@ func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
 			return
 		}
 
-		userID := middleware.GetUserID(req.Context())
-		if userID == "" {
-			userID = "anonymous"
+		userID, err := getUserIDFromContext(req)
+		if err != nil {
+			http.Error(res, "Unauthorized", http.StatusUnauthorized)
+			return
 		}
 
 		var requests []BatchShortenRequest
-		err := json.NewDecoder(req.Body).Decode(&requests)
+		err = json.NewDecoder(req.Body).Decode(&requests)
 		if err != nil {
 			logger.Logger.Errorw("Failed to decode batch request", "error", err)
 			http.Error(res, "Bad Request: Invalid JSON", http.StatusBadRequest)
@@ -440,7 +430,11 @@ func apiDeleteUserURLs(deleteManager *worker.DeleteManager) http.HandlerFunc {
 			return
 		}
 
-		userID := middleware.GetUserID(r.Context())
+		userID, err := getUserIDFromContext(r)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 
 		// Асинхронная отправка в буфер
 		select {

@@ -13,6 +13,7 @@ import (
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/middleware"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
+	"github.com/asbm77/go-musthave-shortener-tpl/internal/worker"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -101,6 +102,10 @@ func main() {
 	}
 	defer store.Close()
 
+	deleteManager := worker.NewDeleteManager(store, flagDeleteBufferSize, flagDeleteFlushInterval)
+	deleteManager.Start()
+	defer deleteManager.Stop()
+
 	// Настройка graceful shutdown
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -131,7 +136,7 @@ func main() {
 			r.Post("/", apiPost(store))
 
 			// Новый эндпоинт для удаления
-			r.Delete("/api/user/urls", apiDeleteUserURLs(store))
+			r.Delete("/api/user/urls", apiDeleteUserURLs(deleteManager))
 		})
 	} else {
 		// Режим совместимости - все маршруты без аутентификации
@@ -141,7 +146,7 @@ func main() {
 		r.Post("/", apiPost(store))
 		r.Post("/api/shorten", apiPostShorten(store))
 		r.Post("/api/shorten/batch", apiPostShortenBatch(store))
-		r.Delete("/api/user/urls", apiDeleteUserURLs(store))
+		r.Delete("/api/user/urls", apiDeleteUserURLs(deleteManager))
 	}
 
 	err = http.ListenAndServe(flagRunAddr, r)

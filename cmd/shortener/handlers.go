@@ -15,6 +15,7 @@ import (
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/middleware"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
+	"github.com/asbm77/go-musthave-shortener-tpl/internal/worker"
 	"github.com/google/uuid"
 )
 
@@ -428,63 +429,29 @@ func apiPostShortenBatch(store storage.Storage) http.HandlerFunc {
 	}
 }
 
-func apiDeleteUserURLs(store storage.Storage) http.HandlerFunc {
-	return func(res http.ResponseWriter, req *http.Request) {
-		if req.Method != http.MethodDelete {
-			http.Error(res, "Method not allowed", http.StatusMethodNotAllowed)
+func apiDeleteUserURLs(deleteManager *worker.DeleteManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			URLs []string `json:"urls"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
 
-		// Получаем userID из контекста
-		userID := middleware.GetUserID(req.Context())
+		userID := middleware.GetUserID(r.Context())
 
-		log.Printf("[DEBUG] apiDeleteUserURLs - userID from context: '%s'", userID)
-
-		if flagEnableAuth && userID == "" {
-			http.Error(res, "Unauthorized", http.StatusUnauthorized)
-			return
+		// Асинхронная отправка в буфер
+		select {
+		case deleteManager.GetQueue() <- worker.DeleteRequest{
+			UserID: userID,
+			URLs:   req.URLs,
+		}:
+			w.WriteHeader(http.StatusAccepted) // 202 Accepted
+			w.Write([]byte(`{"status":"accepted"}`))
+		default:
+			http.Error(w, "Server busy, please try again later", http.StatusServiceUnavailable)
 		}
-
-		if userID == "" {
-			userID = "anonymous"
-		}
-
-		// Декодируем список коротких URL из тела запроса
-		var shortURLs []string
-		err := json.NewDecoder(req.Body).Decode(&shortURLs)
-		if err != nil {
-			http.Error(res, "Bad Request: Invalid JSON", http.StatusBadRequest)
-			return
-		}
-
-		if len(shortURLs) == 0 {
-			http.Error(res, "Bad Request: Empty list", http.StatusBadRequest)
-			return
-		}
-
-		// Извлекаем только ID из полных URL (если переданы полные URL)
-		for i, shortURL := range shortURLs {
-			// Очищаем URL, оставляя только ID
-			if strings.Contains(shortURL, "/") {
-				parts := strings.Split(shortURL, "/")
-				shortURLs[i] = parts[len(parts)-1]
-			}
-		}
-
-		// Асинхронно удаляем URL
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			if err := store.DeleteUserURLs(ctx, userID, shortURLs); err != nil {
-				log.Printf("[ERROR] Failed to delete URLs for user %s: %v", userID, err)
-			} else {
-				log.Printf("[INFO] Successfully deleted %d URLs for user %s", len(shortURLs), userID)
-			}
-		}()
-
-		// Возвращаем 202 Accepted
-		res.WriteHeader(http.StatusAccepted)
-		log.Printf("[DEBUG] apiDeleteUserURLs - accepted deletion request for %d URLs from user %s", len(shortURLs), userID)
 	}
 }

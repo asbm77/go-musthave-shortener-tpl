@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asbm77/go-musthave-shortener-tpl/internal/audit"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/auth"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/middleware"
@@ -215,7 +216,6 @@ func TestCreateStorage(t *testing.T) {
 }
 
 // Тест для аутентификации
-// Тест для аутентификации
 func TestAuthMiddleware(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID := middleware.GetUserID(r.Context())
@@ -239,9 +239,8 @@ func TestAuthMiddleware(t *testing.T) {
 			t.Errorf("Expected status %d, got %d", http.StatusOK, rec.Code)
 		}
 
-		// Получаем результат и закрываем тело
 		result := rec.Result()
-		defer result.Body.Close() // Закрываем тело ответа
+		defer result.Body.Close()
 
 		cookies := result.Cookies()
 		found := false
@@ -304,7 +303,7 @@ func TestBatchCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get cookie: %v", err)
 	}
-	defer resp.Body.Close() // Используем defer для закрытия
+	defer resp.Body.Close()
 
 	// Получаем куку из ответа
 	for _, cookie := range resp.Cookies() {
@@ -396,11 +395,13 @@ func TestSignalHandling(t *testing.T) {
 // Тест для конкурентных запросов
 func TestConcurrentRequests(t *testing.T) {
 	store := storage.NewInMemoryStorage()
+	auditManager := audit.NewManager()
+	defer auditManager.Close()
 
 	r := chi.NewRouter()
 	r.Use(middleware.AuthMiddleware)
-	r.Post("/", apiPost(store))
-	r.Get("/{id}", redirectHandler(store))
+	r.Post("/", apiPost(store, auditManager))
+	r.Get("/{id}", redirectHandler(store, auditManager))
 
 	server := httptest.NewServer(r)
 	defer server.Close()
@@ -439,23 +440,19 @@ func TestConcurrentRequests(t *testing.T) {
 }
 
 // Тест для API получения URL пользователя
-// Тест для API получения URL пользователя
 func TestAPIGetUserURLs(t *testing.T) {
-
 	if !flagEnableAuth {
 		t.Skip("Skipping authentication test because auth is disabled")
 	}
 
 	store := storage.NewInMemoryStorage()
 
-	// Создаем тестового пользователя и токен
 	userID := auth.GenerateUserID()
 	token, err := auth.GenerateToken(userID)
 	if err != nil {
 		t.Fatalf("Failed to generate token: %v", err)
 	}
 
-	// Сохраняем тестовые URL
 	ctx := context.Background()
 	_, err = store.SaveUserURL(ctx, userID, "abc123", "https://test1.com")
 	if err != nil {
@@ -466,7 +463,6 @@ func TestAPIGetUserURLs(t *testing.T) {
 		t.Fatalf("Failed to save test URL: %v", err)
 	}
 
-	// Создаем роутер с AuthMiddleware
 	r := chi.NewRouter()
 	r.Use(middleware.AuthMiddleware)
 	r.Get("/api/user/urls", apiGetUserURLs(store))
@@ -507,12 +503,11 @@ func TestAPIGetUserURLs(t *testing.T) {
 	})
 
 	t.Run("User with no URLs returns 204", func(t *testing.T) {
-		// Создаем нового пользователя без URL
 		newUserID := auth.GenerateUserID()
 		newToken, _ := auth.GenerateToken(newUserID)
 
-		// Создаем новый роутер для чистого пользователя
 		newStore := storage.NewInMemoryStorage()
+
 		newR := chi.NewRouter()
 		newR.Use(middleware.AuthMiddleware)
 		newR.Get("/api/user/urls", apiGetUserURLs(newStore))
@@ -538,8 +533,6 @@ func TestAPIGetUserURLs(t *testing.T) {
 	})
 
 	t.Run("Request without cookie - AuthMiddleware creates new user but returns NoContent", func(t *testing.T) {
-		// Запрос без куки - AuthMiddleware создаст нового пользователя
-		// Но у нового пользователя нет URL, поэтому должно быть 204
 		req, _ := http.NewRequest(http.MethodGet, server.URL+"/api/user/urls", nil)
 
 		resp, err := client.Do(req)
@@ -548,9 +541,277 @@ func TestAPIGetUserURLs(t *testing.T) {
 		}
 		defer resp.Body.Close()
 
-		// У нового пользователя нет URL, поэтому 204
 		if resp.StatusCode != http.StatusNoContent {
 			t.Errorf("Expected status %d, got %d", http.StatusNoContent, resp.StatusCode)
+		}
+	})
+}
+
+// ============ ТЕСТЫ АУДИТА ============
+
+// Тест для FileObserver
+func TestFileObserver(t *testing.T) {
+	// Используем временную директорию для тестов
+	tmpDir := t.TempDir()
+	tmpFile := tmpDir + "/test-audit.log"
+
+	observer, err := audit.NewFileObserver(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to create file observer: %v", err)
+	}
+	defer observer.Close()
+
+	event := audit.NewEvent(audit.ActionShorten, "test-user", "https://example.com")
+
+	err = observer.Notify(event)
+	if err != nil {
+		t.Fatalf("Failed to notify: %v", err)
+	}
+
+	// Проверяем, что файл создан
+	if _, err := os.Stat(tmpFile); os.IsNotExist(err) {
+		t.Fatal("Audit file was not created")
+	}
+
+	// Читаем файл и проверяем содержимое
+	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to read audit file: %v", err)
+	}
+
+	var receivedEvent audit.Event
+	if err := json.Unmarshal(data, &receivedEvent); err != nil {
+		t.Fatalf("Failed to unmarshal event: %v", err)
+	}
+
+	if receivedEvent.Action != audit.ActionShorten {
+		t.Errorf("Expected action %s, got %s", audit.ActionShorten, receivedEvent.Action)
+	}
+	if receivedEvent.UserID != "test-user" {
+		t.Errorf("Expected user_id test-user, got %s", receivedEvent.UserID)
+	}
+	if receivedEvent.URL != "https://example.com" {
+		t.Errorf("Expected URL https://example.com, got %s", receivedEvent.URL)
+	}
+}
+
+// Тест для HTTPObserver
+func TestHTTPObserver(t *testing.T) {
+	// Создаем тестовый HTTP сервер
+	receivedEvents := make(chan *audit.Event, 1)
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var event audit.Event
+		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+			t.Errorf("Failed to decode event: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		receivedEvents <- &event
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	observer := audit.NewHTTPObserver(testServer.URL)
+
+	event := audit.NewEvent(audit.ActionFollow, "test-user-http", "https://example-follow.com")
+
+	err := observer.Notify(event)
+	if err != nil {
+		t.Fatalf("Failed to notify: %v", err)
+	}
+
+	// Ждем получения события
+	select {
+	case received := <-receivedEvents:
+		if received.Action != audit.ActionFollow {
+			t.Errorf("Expected action %s, got %s", audit.ActionFollow, received.Action)
+		}
+		if received.UserID != "test-user-http" {
+			t.Errorf("Expected user_id test-user-http, got %s", received.UserID)
+		}
+		if received.URL != "https://example-follow.com" {
+			t.Errorf("Expected URL https://example-follow.com, got %s", received.URL)
+		}
+		if received.Timestamp == 0 {
+			t.Error("Timestamp should not be 0")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timeout waiting for event")
+	}
+}
+
+// Тест для HTTPObserver с ошибкой
+func TestHTTPObserverError(t *testing.T) {
+	observer := audit.NewHTTPObserver("http://localhost:9999/audit")
+
+	event := audit.NewEvent(audit.ActionShorten, "test-user", "https://example.com")
+
+	err := observer.Notify(event)
+	if err == nil {
+		t.Error("Expected error, got nil")
+	}
+}
+
+// Тест для Manager
+func TestAuditManager(t *testing.T) {
+	manager := audit.NewManager()
+	defer manager.Close()
+
+	mockObserver := &MockObserver{events: make([]*audit.Event, 0)}
+	manager.Register(mockObserver)
+
+	event := audit.NewEvent(audit.ActionShorten, "test-user", "https://example.com")
+	manager.NotifyAll(event)
+
+	// Даем время на асинхронную отправку
+	time.Sleep(100 * time.Millisecond)
+
+	if len(mockObserver.events) != 1 {
+		t.Errorf("Expected 1 event, got %d", len(mockObserver.events))
+	}
+}
+
+// MockObserver для тестирования
+type MockObserver struct {
+	events []*audit.Event
+}
+
+func (m *MockObserver) Notify(event *audit.Event) error {
+	m.events = append(m.events, event)
+	return nil
+}
+
+func (m *MockObserver) Close() error {
+	return nil
+}
+
+// Тест интеграции аудита с API
+func TestAuditIntegrationWithAPI(t *testing.T) {
+	store := storage.NewInMemoryStorage()
+	auditManager := audit.NewManager()
+	defer auditManager.Close()
+
+	// Создаем наблюдатель для сбора событий
+	mockObserver := &MockObserver{events: make([]*audit.Event, 0)}
+	auditManager.Register(mockObserver)
+
+	r := chi.NewRouter()
+	r.Use(middleware.AuthMiddleware)
+	r.Post("/api/shorten", apiPostShorten(store, auditManager))
+	r.Get("/{id}", redirectHandler(store, auditManager))
+
+	server := httptest.NewServer(r)
+	defer server.Close()
+
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	// Генерируем userID и токен для теста
+	userID := auth.GenerateUserID()
+	token, err := auth.GenerateToken(userID)
+	if err != nil {
+		t.Fatalf("Failed to generate token: %v", err)
+	}
+
+	authCookie := &http.Cookie{
+		Name:  "user_token",
+		Value: token,
+	}
+
+	// Тестируем создание короткой ссылки
+	t.Run("Create short URL generates audit event", func(t *testing.T) {
+		// Очищаем события перед тестом
+		mockObserver.events = make([]*audit.Event, 0)
+
+		reqBody := ShortenRequest{URL: "https://audit-test.com"}
+		jsonBody, _ := json.Marshal(reqBody)
+
+		req, _ := http.NewRequest(http.MethodPost, server.URL+"/api/shorten", bytes.NewBuffer(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(authCookie)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusCreated {
+			t.Errorf("Expected status %d, got %d", http.StatusCreated, resp.StatusCode)
+		}
+
+		// Проверяем, что событие аудита было создано
+		time.Sleep(100 * time.Millisecond)
+
+		if len(mockObserver.events) == 0 {
+			t.Error("No audit events were created")
+		}
+
+		found := false
+		for _, event := range mockObserver.events {
+			if event.Action == audit.ActionShorten && event.URL == "https://audit-test.com" {
+				found = true
+				if event.UserID != userID {
+					t.Errorf("Expected user_id %s, got %s", userID, event.UserID)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Error("Shorten audit event not found")
+		}
+	})
+
+	// Тестируем переход по ссылке
+	t.Run("Follow short URL generates audit event", func(t *testing.T) {
+		// Очищаем события перед тестом
+		mockObserver.events = make([]*audit.Event, 0)
+
+		// Сначала создаем URL
+		shortKey := "test123"
+		originalURL := "https://follow-test.com"
+		ctx := context.Background()
+		_, err := store.SaveUserURL(ctx, userID, shortKey, originalURL)
+		if err != nil {
+			t.Fatalf("Failed to save URL: %v", err)
+		}
+
+		// Затем переходим по нему
+		req, _ := http.NewRequest(http.MethodGet, server.URL+"/"+shortKey, nil)
+		req.AddCookie(authCookie)
+
+		// Отключаем редирект, чтобы проверить статус
+		clientNoRedirect := &http.Client{
+			Timeout: 10 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+
+		resp, err := clientNoRedirect.Do(req)
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusTemporaryRedirect {
+			t.Errorf("Expected status %d, got %d", http.StatusTemporaryRedirect, resp.StatusCode)
+		}
+
+		// Проверяем, что событие аудита было создано
+		time.Sleep(100 * time.Millisecond)
+
+		found := false
+		for _, event := range mockObserver.events {
+			if event.Action == audit.ActionFollow && event.URL == originalURL {
+				found = true
+				if event.UserID != userID {
+					t.Errorf("Expected user_id %s, got %s", userID, event.UserID)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Error("Follow audit event not found")
 		}
 	})
 }
@@ -590,7 +851,10 @@ func BenchmarkResponseWriterWrapper(b *testing.B) {
 
 func BenchmarkAPIEndpoint(b *testing.B) {
 	store := storage.NewInMemoryStorage()
-	handler := apiPost(store)
+	auditManager := audit.NewManager()
+	defer auditManager.Close()
+
+	handler := apiPost(store, auditManager)
 
 	userID := auth.GenerateUserID()
 
@@ -601,5 +865,21 @@ func BenchmarkAPIEndpoint(b *testing.B) {
 		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
+	}
+}
+
+// Бенчмарк для аудита
+func BenchmarkAuditManager(b *testing.B) {
+	manager := audit.NewManager()
+	defer manager.Close()
+
+	mockObserver := &MockObserver{events: make([]*audit.Event, 0)}
+	manager.Register(mockObserver)
+
+	event := audit.NewEvent(audit.ActionShorten, "bench-user", "https://bench.com")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		manager.NotifyAll(event)
 	}
 }

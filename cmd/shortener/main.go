@@ -1,6 +1,6 @@
 package main
 
-//11_
+//16_
 import (
 	"fmt"
 	"log"
@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/asbm77/go-musthave-shortener-tpl/internal/audit"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/middleware"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
@@ -92,6 +93,34 @@ func createStorage() (storage.Storage, error) {
 	return storage.NewInMemoryStorage(), nil
 }
 
+func setupAudit() *audit.Manager {
+	auditManager := audit.NewManager()
+
+	// Настройка файлового наблюдателя
+	if flagAuditFile != "" {
+		fileObserver, err := audit.NewFileObserver(flagAuditFile)
+		if err != nil {
+			log.Printf("Warning: failed to create file observer: %v", err)
+		} else {
+			auditManager.Register(fileObserver)
+			log.Printf("Audit file logging enabled: %s", flagAuditFile)
+		}
+	}
+
+	// Настройка HTTP наблюдателя
+	if flagAuditURL != "" {
+		httpObserver := audit.NewHTTPObserver(flagAuditURL)
+		auditManager.Register(httpObserver)
+		log.Printf("Audit HTTP logging enabled: %s", flagAuditURL)
+	}
+
+	if flagAuditFile == "" && flagAuditURL == "" {
+		log.Println("Audit is disabled")
+	}
+
+	return auditManager
+}
+
 func main() {
 	parseFlags()
 	SetEnableAuth(flagEnableAuth)
@@ -105,6 +134,10 @@ func main() {
 	deleteManager := worker.NewDeleteManager(store, flagDeleteBufferSize, flagDeleteFlushInterval)
 	deleteManager.Start()
 	defer deleteManager.Stop()
+
+	// Настройка аудита
+	auditManager := setupAudit()
+	defer auditManager.Close()
 
 	// Настройка graceful shutdown
 	c := make(chan os.Signal, 1)
@@ -125,15 +158,15 @@ func main() {
 	if flagEnableAuth {
 		// Публичные маршруты (без аутентификации)
 		r.Get("/ping", apiGetPing(store))
-		r.Get("/{id}", redirectHandler(store))
+		r.Get("/{id}", redirectHandler(store, auditManager))
 
 		// Защищенные маршруты - применяем AuthMiddleware
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.AuthMiddleware)
 			r.Get("/api/user/urls", apiGetUserURLs(store))
-			r.Post("/api/shorten", apiPostShorten(store))
+			r.Post("/api/shorten", apiPostShorten(store, auditManager))
 			r.Post("/api/shorten/batch", apiPostShortenBatch(store))
-			r.Post("/", apiPost(store))
+			r.Post("/", apiPost(store, auditManager))
 
 			// Новый эндпоинт для удаления
 			r.Delete("/api/user/urls", apiDeleteUserURLs(deleteManager))
@@ -141,10 +174,10 @@ func main() {
 	} else {
 		// Режим совместимости - все маршруты без аутентификации
 		r.Get("/ping", apiGetPing(store))
-		r.Get("/{id}", redirectHandler(store))
+		r.Get("/{id}", redirectHandler(store, auditManager))
 		r.Get("/api/user/urls", apiGetUserURLs(store))
-		r.Post("/", apiPost(store))
-		r.Post("/api/shorten", apiPostShorten(store))
+		r.Post("/", apiPost(store, auditManager))
+		r.Post("/api/shorten", apiPostShorten(store, auditManager))
 		r.Post("/api/shorten/batch", apiPostShortenBatch(store))
 		r.Delete("/api/user/urls", apiDeleteUserURLs(deleteManager))
 	}

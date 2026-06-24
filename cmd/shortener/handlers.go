@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asbm77/go-musthave-shortener-tpl/internal/audit"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/logger"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/middleware"
 	"github.com/asbm77/go-musthave-shortener-tpl/internal/storage"
@@ -65,7 +66,7 @@ func getUserIDFromContext(r *http.Request) (string, error) {
 	return userID, nil
 }
 
-func apiPost(store storage.Storage) http.HandlerFunc {
+func apiPost(store storage.Storage, auditManager *audit.Manager) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			http.Error(res, "400 Bad Request", http.StatusBadRequest)
@@ -109,6 +110,13 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 				res.Header().Set("Content-Type", "text/plain")
 				res.WriteHeader(http.StatusConflict)
 				fmt.Fprintf(res, "%s", existingShortURL)
+
+				// Отправка аудит-события даже при конфликте (URL уже существует)
+				auditManager.NotifyAll(audit.NewEvent(
+					audit.ActionShorten,
+					userID,
+					originalURL,
+				))
 				return
 			}
 			log.Printf("[DEBUG] apiPost - SaveUserURL error: %v", err)
@@ -122,6 +130,13 @@ func apiPost(store storage.Storage) http.HandlerFunc {
 		fmt.Fprintf(res, "%s", shortURL)
 
 		log.Printf("[DEBUG] apiPost - saved URL for user %s: %s -> %s", userID, originalURL, shortURL)
+
+		// Отправка аудит-события после успешного создания URL
+		auditManager.NotifyAll(audit.NewEvent(
+			audit.ActionShorten,
+			userID,
+			originalURL,
+		))
 	}
 }
 
@@ -161,7 +176,7 @@ func apiGetPing(store storage.Storage) http.HandlerFunc {
 	}
 }
 
-func apiPostShorten(store storage.Storage) http.HandlerFunc {
+func apiPostShorten(store storage.Storage, auditManager *audit.Manager) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			http.Error(res, "Method not allowed", http.StatusMethodNotAllowed)
@@ -205,6 +220,13 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 				res.Header().Set("Content-Type", "application/json")
 				res.WriteHeader(http.StatusConflict)
 				json.NewEncoder(res).Encode(response)
+
+				// Отправка аудит-события при конфликте (URL уже существует)
+				auditManager.NotifyAll(audit.NewEvent(
+					audit.ActionShorten,
+					userID,
+					sreq.URL,
+				))
 				return
 			}
 			log.Printf("[DEBUG] apiPostShorten - SaveUserURL error: %v", err)
@@ -219,6 +241,13 @@ func apiPostShorten(store storage.Storage) http.HandlerFunc {
 		json.NewEncoder(res).Encode(response)
 
 		log.Printf("[DEBUG] apiPostShorten - saved URL for user %s: %s -> %s", userID, sreq.URL, shortURL)
+
+		// Отправка аудит-события после успешного создания URL
+		auditManager.NotifyAll(audit.NewEvent(
+			audit.ActionShorten,
+			userID,
+			sreq.URL,
+		))
 	}
 }
 
@@ -275,7 +304,7 @@ func apiGetUserURLs(store storage.Storage) http.HandlerFunc {
 	}
 }
 
-func redirectHandler(store storage.Storage) http.HandlerFunc {
+func redirectHandler(store storage.Storage, auditManager *audit.Manager) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		id := strings.TrimPrefix(req.URL.Path, "/")
 
@@ -283,6 +312,9 @@ func redirectHandler(store storage.Storage) http.HandlerFunc {
 			http.NotFound(res, req)
 			return
 		}
+
+		// Получаем userID из контекста (если есть)
+		userID, _ := getUserIDFromContext(req)
 
 		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
 		defer cancel()
@@ -307,6 +339,13 @@ func redirectHandler(store storage.Storage) http.HandlerFunc {
 			http.NotFound(res, req)
 			return
 		}
+
+		// Отправка аудит-события после успешного получения URL (перед редиректом)
+		auditManager.NotifyAll(audit.NewEvent(
+			audit.ActionFollow,
+			userID,
+			originalURL,
+		))
 
 		http.Redirect(res, req, originalURL, http.StatusTemporaryRedirect)
 	}

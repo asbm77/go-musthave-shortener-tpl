@@ -13,6 +13,8 @@ var flagConnDB string
 var flagEnableAuth bool
 var flagDeleteBufferSize int = 100
 var flagDeleteFlushInterval time.Duration = 5 * time.Second
+var flagAuditFile string
+var flagAuditURL string
 
 func parseFlags() {
 	flag.StringVar(&flagRunAddr, "a", "localhost:8080", "address and port to run server")
@@ -22,6 +24,8 @@ func parseFlags() {
 	flag.BoolVar(&flagEnableAuth, "auth", true, "enable authentication")
 	flag.IntVar(&flagDeleteBufferSize, "dbs", 100, "Delete buffer size")
 	flag.DurationVar(&flagDeleteFlushInterval, "dfi", 5*time.Second, "Delete flush interval")
+	flag.StringVar(&flagAuditFile, "audit-file", "", "path to audit log file")
+	flag.StringVar(&flagAuditURL, "audit-url", "", "URL for remote audit server")
 
 	flag.Parse()
 
@@ -43,6 +47,13 @@ func parseFlags() {
 
 	if envEnableAuth := os.Getenv("ENABLE_AUTH"); envEnableAuth == "true" {
 		flagEnableAuth = true
+	}
+
+	if envAuditFile := os.Getenv("AUDIT_FILE"); envAuditFile != "" {
+		flagAuditFile = envAuditFile
+	}
+	if envAuditURL := os.Getenv("AUDIT_URL"); envAuditURL != "" {
+		flagAuditURL = envAuditURL
 	}
 
 }
